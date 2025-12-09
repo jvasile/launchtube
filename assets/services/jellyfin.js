@@ -403,9 +403,30 @@
         script.remove();
     }
 
+    // Hide menu items that don't work with external player
+    function hidePlayMenuItems() {
+        const style = document.createElement('style');
+        style.textContent = `
+            /* Hide play options in context menus that don't trigger external player */
+            .actionSheetMenuItem[data-id="play"],
+            .actionSheetMenuItem[data-id="playallfromhere"],
+            .actionSheetMenuItem[data-id="queue"],
+            .actionSheetMenuItem[data-id="queuenext"],
+            .listItem[data-action="play"],
+            .listItem[data-action="playallfromhere"],
+            /* Hide menu items with play icon */
+            .actionSheetMenuItem:has(.play_arrow),
+            .listItem:has(.play_arrow) {
+                display: none !important;
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
     // Initialize
     function init() {
         console.log('Launch Tube: Initializing Jellyfin integration');
+        hidePlayMenuItems();
         attachPlayListeners();
         interceptVideoPlayback();
     }

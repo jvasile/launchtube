@@ -10,6 +10,8 @@ import 'package:flutter_svg/flutter_svg.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  // Log asset directory at startup
+  getAssetDirectory();
   runApp(const LaunchTubeApp());
 }
 
@@ -323,16 +325,16 @@ String getAssetDirectory() {
     return userDir;
   }
 
-  // Fallback: look for data/ directory in parent directories of the binary
+  // Fallback: look for hot-assets/ directory in parent directories of the binary
   // This enables running from source
   final exePath = Platform.resolvedExecutable;
   var dir = Directory(exePath).parent;
-  for (var i = 0; i < 5; i++) {
-    final dataDir = Directory('${dir.path}/data');
-    if (dataDir.existsSync()) {
-      print('Using asset directory: ${dataDir.path}');
-      _cachedAssetDir = dataDir.path;
-      return dataDir.path;
+  for (var i = 0; i < 10; i++) {
+    final hotAssetsDir = Directory('${dir.path}/hot-assets');
+    if (hotAssetsDir.existsSync()) {
+      print('Using asset directory: ${hotAssetsDir.path}');
+      _cachedAssetDir = hotAssetsDir.path;
+      return hotAssetsDir.path;
     }
     dir = dir.parent;
   }

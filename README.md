@@ -1,5 +1,7 @@
 # Launch Tube
 
+A launcher for streaming services and media apps.
+
 ## Setup
 
 Edit /etc/lightdm/lightdm.conf:

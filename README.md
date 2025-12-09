@@ -13,7 +13,7 @@ autologin-user-timeout=0
 ```
 
 ```
-$ sudo apt install caffeine xscreensaver xscreensaver-gl-extra
+$ sudo apt install caffeine xscreensaver xscreensaver-gl-extra unclutter
 ```
 
 As guest:
@@ -34,7 +34,19 @@ $ gsettings set org.gnome.desktop.screensaver lock-enabled false
   Exec=caffeine-indicator
   Hidden=false
   X-GNOME-Autostart-enabled=true
+
+# Create ~/.config/autostart/unclutter.desktop:
+[Desktop Entry]
+Type=Application
+Name=Unclutter
+Exec=unclutter --timeout 3
+Hidden=false
+X-GNOME-Autostart-enabled=true
+
+
 ```
 
+
+Install greasemonkey or tampermonkey into Firefox/Chrome.
 
 

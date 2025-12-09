@@ -223,6 +223,171 @@ class ServiceLibraryLoader {
   }
 }
 
+// HTTP server for serving userscripts to browser extensions
+class LaunchTubeServer {
+  HttpServer? _server;
+  int? _port;
+
+  int? get port => _port;
+
+  Future<void> start() async {
+    for (final port in [8765, 8766, 8767, 8768, 8769]) {
+      try {
+        _server = await HttpServer.bind(InternetAddress.loopbackIPv4, port);
+        _port = port;
+        _server!.listen(_handleRequest);
+        debugPrint('Launch Tube server running on port $port');
+        return;
+      } catch (_) {
+        // Port in use, try next
+      }
+    }
+    debugPrint('Failed to start Launch Tube server - all ports in use');
+  }
+
+  void _handleRequest(HttpRequest request) async {
+    // Add CORS headers for browser access
+    request.response.headers.add('Access-Control-Allow-Origin', '*');
+    request.response.headers.add('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    request.response.headers.add('Access-Control-Allow-Headers', '*');
+    request.response.headers.add('Cache-Control', 'no-cache, must-revalidate');
+
+    // Handle CORS preflight
+    if (request.method == 'OPTIONS') {
+      request.response
+        ..statusCode = HttpStatus.ok
+        ..close();
+      return;
+    }
+
+    if (request.uri.path.startsWith('/api/service/')) {
+      final serviceId = request.uri.path.split('/').last;
+      await _serveServiceScript(request, serviceId);
+    } else if (request.uri.path == '/api/ping') {
+      // Health check endpoint for port discovery
+      request.response
+        ..headers.contentType = ContentType.json
+        ..write('{"status":"ok","app":"launchtube"}')
+        ..close();
+    } else if (request.uri.path == '/launchtube-loader.user.js') {
+      // Serve userscript for Tampermonkey installation
+      await _serveUserscript(request);
+    } else if (request.uri.path == '/install') {
+      // Serve install page that auto-closes
+      await _serveInstallPage(request);
+    } else if (request.uri.path == '/api/shutdown') {
+      // Trigger application shutdown
+      request.response
+        ..headers.contentType = ContentType.json
+        ..write('{"status":"ok","message":"shutting down"}')
+        ..close();
+      // Exit the application after responding
+      Future.delayed(const Duration(milliseconds: 100), () => exit(0));
+    } else {
+      request.response
+        ..statusCode = HttpStatus.notFound
+        ..write('Not found')
+        ..close();
+    }
+  }
+
+  Future<void> _serveServiceScript(HttpRequest request, String serviceId) async {
+    try {
+      final script = await rootBundle.loadString('assets/services/$serviceId.js');
+      request.response
+        ..headers.contentType = ContentType('application', 'javascript', charset: 'utf-8')
+        ..write(script)
+        ..close();
+    } catch (_) {
+      request.response
+        ..statusCode = HttpStatus.notFound
+        ..write('// Script not found for service: $serviceId')
+        ..close();
+    }
+  }
+
+  Future<void> _serveUserscript(HttpRequest request) async {
+    try {
+      final script = await rootBundle.loadString('assets/launchtube-loader.user.js');
+      request.response
+        ..headers.contentType = ContentType('application', 'javascript', charset: 'utf-8')
+        ..write(script)
+        ..close();
+    } catch (_) {
+      request.response
+        ..statusCode = HttpStatus.notFound
+        ..write('// Userscript not found')
+        ..close();
+    }
+  }
+
+  Future<void> _serveInstallPage(HttpRequest request) async {
+    final html = '''
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Launch Tube - Install Userscript</title>
+  <style>
+    body {
+      background: #1A1A2E;
+      color: white;
+      font-family: system-ui, sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+    }
+    .container {
+      text-align: center;
+    }
+    a {
+      color: #4FC3F7;
+      font-size: 1.2em;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>Installing Launch Tube Userscript...</h2>
+    <p>If the install dialog doesn't appear, <a href="/launchtube-loader.user.js">click here</a>.</p>
+    <p id="status">This window will close automatically.</p>
+  </div>
+  <script>
+    // Redirect to userscript URL to trigger Tampermonkey
+    location.href = '/launchtube-loader.user.js';
+    // Try to close window after a delay (gives time for install dialog)
+    setTimeout(function() {
+      window.close();
+    }, 2000);
+  </script>
+</body>
+</html>
+''';
+    request.response
+      ..headers.contentType = ContentType.html
+      ..write(html)
+      ..close();
+  }
+
+  /// Opens the default browser to install the userscript
+  Future<void> openUserscriptInstall() async {
+    if (_port == null) return;
+    final url = 'http://127.0.0.1:$_port/install';
+    if (Platform.isLinux) {
+      await Process.start('xdg-open', [url], mode: ProcessStartMode.detached);
+    } else if (Platform.isWindows) {
+      await Process.start('start', [url], mode: ProcessStartMode.detached, runInShell: true);
+    }
+  }
+
+  Future<void> stop() async {
+    await _server?.close();
+    _server = null;
+    _port = null;
+  }
+}
+
 // Available colors for selection
 final List<Color> availableColors = [
   const Color(0xFF000000), // Black
@@ -270,16 +435,19 @@ class _LauncherHomeState extends State<LauncherHome> {
   bool _moveMode = false;
   int? _moveFromIndex;
   final FocusNode _focusNode = FocusNode();
+  final LaunchTubeServer _server = LaunchTubeServer();
 
   @override
   void initState() {
     super.initState();
     _enterFullscreen();
     _loadApps();
+    _server.start();
   }
 
   @override
   void dispose() {
+    _server.stop();
     _focusNode.dispose();
     super.dispose();
   }
@@ -515,7 +683,39 @@ class _LauncherHomeState extends State<LauncherHome> {
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               const SizedBox(height: 40),
-              Center(child: Image.asset('assets/images/launch-tube-logo/logo_wide.png', height: 100)),
+              Stack(
+                alignment: Alignment.center,
+                children: [
+                  Center(child: Image.asset('assets/images/launch-tube-logo/logo_wide.png', height: 100)),
+                  Positioned(
+                    left: 20,
+                    child: PopupMenuButton<String>(
+                      icon: const Icon(Icons.menu, color: Colors.white54),
+                      tooltip: 'Menu',
+                      color: const Color(0xFF2A2A4E),
+                      onSelected: (value) {
+                        switch (value) {
+                          case 'install_userscript':
+                            _server.openUserscriptInstall();
+                            break;
+                        }
+                      },
+                      itemBuilder: (context) => [
+                        const PopupMenuItem(
+                          value: 'install_userscript',
+                          child: Row(
+                            children: [
+                              Icon(Icons.extension, color: Colors.white70),
+                              SizedBox(width: 12),
+                              Text('Install Browser Userscript'),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
               const Spacer(),
               LayoutBuilder(
                 builder: (context, constraints) {

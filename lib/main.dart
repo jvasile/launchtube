@@ -24,6 +24,7 @@ class AppConfig {
   String? imagePath;
   int colorValue;
   bool showName;
+  String? serviceId; // ID for loading service-specific userscript
 
   AppConfig({
     required this.name,
@@ -34,6 +35,7 @@ class AppConfig {
     this.imagePath,
     required this.colorValue,
     this.showName = true,
+    this.serviceId,
   });
 
   Color get color => Color(colorValue);
@@ -47,6 +49,7 @@ class AppConfig {
         'imagePath': imagePath,
         'colorValue': colorValue,
         'showName': showName,
+        'serviceId': serviceId,
       };
 
   factory AppConfig.fromJson(Map<String, dynamic> json) => AppConfig(
@@ -58,6 +61,7 @@ class AppConfig {
         imagePath: json['imagePath'],
         colorValue: json['colorValue'],
         showName: json['showName'] ?? true,
+        serviceId: json['serviceId'],
       );
 
   AppConfig copy() => AppConfig(
@@ -69,6 +73,7 @@ class AppConfig {
         imagePath: imagePath,
         colorValue: colorValue,
         showName: showName,
+        serviceId: serviceId,
       );
 }
 
@@ -76,6 +81,7 @@ final List<AppConfig> defaultApps = [];
 
 // Service library for pre-configured streaming services
 class ServiceTemplate {
+  final String id; // Service ID for userscript matching
   final String name;
   final String url;
   final int colorValue;
@@ -83,6 +89,7 @@ class ServiceTemplate {
   final bool isBundled; // true = bundled asset, false = user file
 
   const ServiceTemplate({
+    required this.id,
     required this.name,
     required this.url,
     required this.colorValue,
@@ -90,8 +97,9 @@ class ServiceTemplate {
     this.isBundled = true,
   });
 
-  factory ServiceTemplate.fromJson(Map<String, dynamic> json, String? logoPath, bool isBundled) {
+  factory ServiceTemplate.fromJson(String id, Map<String, dynamic> json, String? logoPath, bool isBundled) {
     return ServiceTemplate(
+      id: id,
       name: json['name'] as String,
       url: json['url'] as String,
       colorValue: _parseColor(json['color'] as String),
@@ -113,6 +121,7 @@ class ServiceTemplate {
     colorValue: colorValue,
     imagePath: logoPath,
     showName: logoPath == null,
+    serviceId: id,
   );
 }
 
@@ -165,7 +174,7 @@ class ServiceLibraryLoader {
             }
           }
 
-          services.add(ServiceTemplate.fromJson(json, logoPath, true));
+          services.add(ServiceTemplate.fromJson(serviceId, json, logoPath, true));
         } catch (e) {
           // Skip invalid service files
           debugPrint('Failed to load bundled service $serviceId: $e');
@@ -199,6 +208,10 @@ class ServiceLibraryLoader {
           final jsonStr = await File(file.path).readAsString();
           final json = jsonDecode(jsonStr) as Map<String, dynamic>;
 
+          // Extract service ID from filename
+          final fileName = file.path.split('/').last;
+          final serviceId = fileName.replaceAll('.json', '');
+
           // Check for logo file with same base name
           final baseName = file.path.replaceAll('.json', '');
           String? logoPath;
@@ -210,7 +223,7 @@ class ServiceLibraryLoader {
             }
           }
 
-          services.add(ServiceTemplate.fromJson(json, logoPath, false));
+          services.add(ServiceTemplate.fromJson(serviceId, json, logoPath, false));
         } catch (e) {
           debugPrint('Failed to load user service ${file.path}: $e');
         }
@@ -300,12 +313,256 @@ class ServiceDataStore {
   }
 }
 
+// External player (mpv) with IPC for position tracking
+class ExternalPlayer {
+  static ExternalPlayer? _instance;
+  Process? _process;
+  Socket? _ipcSocket;
+  String _ipcPath = '/tmp/launchtube-mpv.sock';
+
+  double _position = 0;
+  double _duration = 0;
+  bool _paused = false;
+  Map<String, dynamic>? _onComplete;
+
+  static ExternalPlayer getInstance() {
+    _instance ??= ExternalPlayer();
+    return _instance!;
+  }
+
+  bool get isPlaying => _process != null;
+  double get position => _position;
+  double get duration => _duration;
+  bool get paused => _paused;
+
+  Future<void> play({
+    required String url,
+    String? title,
+    double startPosition = 0,
+    Map<String, dynamic>? onComplete,
+  }) async {
+    // Stop any existing playback
+    await stop();
+
+    _onComplete = onComplete;
+    _position = startPosition;
+    _duration = 0;
+    _paused = false;
+
+    // Remove old socket file if exists
+    final socketFile = File(_ipcPath);
+    if (await socketFile.exists()) {
+      await socketFile.delete();
+    }
+
+    // Build mpv arguments
+    final args = <String>[
+      '--fullscreen',
+      '--input-ipc-server=$_ipcPath',
+    ];
+
+    if (startPosition > 0) {
+      args.add('--start=${startPosition.toStringAsFixed(1)}');
+    }
+
+    if (title != null) {
+      args.add('--title=$title');
+    }
+
+    args.add(url);
+
+    // Launch mpv
+    _process = await Process.start('mpv', args, mode: ProcessStartMode.detached);
+    debugPrint('ExternalPlayer: Started mpv with PID ${_process!.pid}');
+
+    // Wait for mpv to exit in background
+    _process!.exitCode.then((_) async {
+      debugPrint('ExternalPlayer: mpv exited, position=$_position');
+
+      // Get final position before cleanup
+      await _queryPosition();
+
+      // Execute onComplete callback
+      if (_onComplete != null) {
+        await _executeCallback();
+      }
+
+      _process = null;
+      _ipcSocket?.close();
+      _ipcSocket = null;
+    });
+
+    // Start position polling
+    _startPositionPolling();
+  }
+
+  void _startPositionPolling() {
+    Future.doWhile(() async {
+      if (_process == null) return false;
+
+      await Future.delayed(const Duration(seconds: 1));
+      if (_process == null) return false;
+
+      await _queryPosition();
+      return _process != null;
+    });
+  }
+
+  Future<void> _queryPosition() async {
+    try {
+      // Query all properties in one connection using mpv's JSON IPC
+      _ipcSocket?.close();
+      _ipcSocket = await Socket.connect(
+        InternetAddress(_ipcPath, type: InternetAddressType.unix),
+        0,
+      ).timeout(const Duration(milliseconds: 500));
+
+      // Send all queries
+      final commands = [
+        jsonEncode({'command': ['get_property', 'time-pos'], 'request_id': 1}),
+        jsonEncode({'command': ['get_property', 'duration'], 'request_id': 2}),
+        jsonEncode({'command': ['get_property', 'pause'], 'request_id': 3}),
+      ].join('\n') + '\n';
+
+      _ipcSocket!.write(commands);
+      await _ipcSocket!.flush();
+
+      // Read responses
+      final buffer = StringBuffer();
+      await for (final chunk in _ipcSocket!.timeout(const Duration(milliseconds: 500))) {
+        buffer.write(utf8.decode(chunk));
+        final content = buffer.toString();
+        if (content.split('\n').where((l) => l.trim().isNotEmpty).length >= 3) {
+          break;
+        }
+      }
+
+      // Parse responses
+      for (final line in buffer.toString().split('\n')) {
+        if (line.trim().isEmpty) continue;
+        try {
+          final data = jsonDecode(line);
+          final requestId = data['request_id'];
+          final value = data['data'];
+          if (value != null) {
+            switch (requestId) {
+              case 1:
+                _position = (value as num).toDouble();
+                break;
+              case 2:
+                _duration = (value as num).toDouble();
+                break;
+              case 3:
+                _paused = value as bool;
+                break;
+            }
+          }
+        } catch (_) {
+          // Skip malformed responses
+        }
+      }
+
+      _ipcSocket?.close();
+      _ipcSocket = null;
+    } catch (e) {
+      // IPC not ready or mpv closed
+      debugPrint('ExternalPlayer: IPC query failed: $e');
+      _ipcSocket?.close();
+      _ipcSocket = null;
+    }
+  }
+
+  Future<void> _executeCallback() async {
+    if (_onComplete == null) return;
+
+    try {
+      final callbackUrl = _onComplete!['url'] as String?;
+      final method = (_onComplete!['method'] as String?) ?? 'POST';
+      final headers = Map<String, String>.from(_onComplete!['headers'] ?? {});
+      final bodyTemplate = _onComplete!['bodyTemplate'];
+
+      if (callbackUrl == null) return;
+
+      // Process body template - replace ${position} and ${positionTicks}
+      String? body;
+      if (bodyTemplate != null) {
+        final positionTicks = (_position * 10000000).round();
+        var bodyStr = jsonEncode(bodyTemplate);
+        bodyStr = bodyStr.replaceAll(r'${position}', _position.toStringAsFixed(1));
+        bodyStr = bodyStr.replaceAll(r'${positionTicks}', positionTicks.toString());
+        body = bodyStr;
+      }
+
+      debugPrint('ExternalPlayer: Executing callback to $callbackUrl');
+      debugPrint('ExternalPlayer: Body: $body');
+
+      final client = HttpClient();
+      final request = await client.openUrl(method, Uri.parse(callbackUrl));
+
+      headers.forEach((key, value) {
+        request.headers.set(key, value);
+      });
+
+      if (body != null) {
+        request.headers.contentType = ContentType.json;
+        request.write(body);
+      }
+
+      final response = await request.close();
+      debugPrint('ExternalPlayer: Callback response: ${response.statusCode}');
+      client.close();
+    } catch (e) {
+      debugPrint('ExternalPlayer: Callback failed: $e');
+    }
+  }
+
+  Future<void> stop() async {
+    if (_process != null) {
+      try {
+        // Try graceful quit via IPC
+        final socket = await Socket.connect(
+          InternetAddress(_ipcPath, type: InternetAddressType.unix),
+          0,
+        ).timeout(const Duration(milliseconds: 500));
+
+        final quitCmd = jsonEncode({'command': ['quit']}) + '\n';
+        socket.write(quitCmd);
+        await socket.flush();
+        socket.close();
+      } catch (_) {
+        // IPC failed, kill process
+        _process?.kill();
+      }
+      _process = null;
+    }
+    _ipcSocket?.close();
+    _ipcSocket = null;
+  }
+
+  Map<String, dynamic> getStatus() {
+    if (_process == null) {
+      return {'playing': false};
+    }
+    return {
+      'playing': true,
+      'paused': _paused,
+      'position': _position,
+      'duration': _duration,
+    };
+  }
+}
+
 // HTTP server for serving userscripts to browser extensions
 class LaunchTubeServer {
   HttpServer? _server;
   int? _port;
+  List<AppConfig> Function()? _getApps;
 
   int? get port => _port;
+
+  void setAppsProvider(List<AppConfig> Function() getApps) {
+    _getApps = getApps;
+  }
 
   Future<void> start() async {
     for (final port in [8765, 8766, 8767, 8768, 8769]) {
@@ -325,7 +582,7 @@ class LaunchTubeServer {
   void _handleRequest(HttpRequest request) async {
     // Add CORS headers for browser access
     request.response.headers.add('Access-Control-Allow-Origin', '*');
-    request.response.headers.add('Access-Control-Allow-Methods', 'GET, PUT, DELETE, OPTIONS');
+    request.response.headers.add('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     request.response.headers.add('Access-Control-Allow-Headers', '*');
     request.response.headers.add('Cache-Control', 'no-cache, must-revalidate');
 
@@ -370,9 +627,13 @@ class LaunchTubeServer {
           '/api/ping',
           '/api/status',
           '/api/shutdown',
+          '/api/match?url={pageUrl}',
           '/api/service/{serviceId}',
           '/api/kv/{serviceId}',
           '/api/kv/{serviceId}/{key}',
+          '/api/player/play',
+          '/api/player/status',
+          '/api/player/stop',
           '/install',
           '/launchtube-loader.user.js',
         ],
@@ -381,6 +642,10 @@ class LaunchTubeServer {
         ..headers.contentType = ContentType.json
         ..write(status)
         ..close();
+    } else if (request.uri.path == '/api/match') {
+      await _handleMatchRequest(request);
+    } else if (request.uri.path.startsWith('/api/player/')) {
+      await _handlePlayerRequest(request);
     } else if (request.uri.path.startsWith('/api/kv/')) {
       await _handleKvRequest(request);
     } else {
@@ -404,6 +669,60 @@ class LaunchTubeServer {
         ..write('// Script not found for service: $serviceId')
         ..close();
     }
+  }
+
+  Future<void> _handleMatchRequest(HttpRequest request) async {
+    final pageUrl = request.uri.queryParameters['url'];
+    if (pageUrl == null || pageUrl.isEmpty) {
+      request.response
+        ..statusCode = HttpStatus.badRequest
+        ..write('// Missing url parameter')
+        ..close();
+      return;
+    }
+
+    // Get configured apps
+    final apps = _getApps?.call() ?? [];
+
+    // Parse the page URL
+    Uri pageUri;
+    try {
+      pageUri = Uri.parse(pageUrl);
+    } catch (_) {
+      request.response
+        ..statusCode = HttpStatus.badRequest
+        ..write('// Invalid url')
+        ..close();
+      return;
+    }
+
+    // Find matching app by comparing hostnames
+    String? matchedServiceId;
+    for (final app in apps) {
+      if (app.url == null || app.serviceId == null) continue;
+
+      try {
+        final appUri = Uri.parse(app.url!);
+        // Match if hostnames are equal (ignoring port for flexibility)
+        if (appUri.host.toLowerCase() == pageUri.host.toLowerCase()) {
+          matchedServiceId = app.serviceId;
+          break;
+        }
+      } catch (_) {
+        // Skip invalid URLs
+      }
+    }
+
+    if (matchedServiceId == null) {
+      // No match - return 204 No Content (not an error, just no script)
+      request.response
+        ..statusCode = HttpStatus.noContent
+        ..close();
+      return;
+    }
+
+    // Serve the matched service script
+    await _serveServiceScript(request, matchedServiceId);
   }
 
   Future<void> _serveUserscript(HttpRequest request) async {
@@ -575,6 +894,68 @@ class LaunchTubeServer {
     }
   }
 
+  Future<void> _handlePlayerRequest(HttpRequest request) async {
+    final path = request.uri.path;
+    final player = ExternalPlayer.getInstance();
+
+    if (path == '/api/player/play' && request.method == 'POST') {
+      try {
+        final body = await utf8.decoder.bind(request).join();
+        final data = jsonDecode(body) as Map<String, dynamic>;
+
+        final url = data['url'] as String?;
+        if (url == null || url.isEmpty) {
+          request.response
+            ..statusCode = HttpStatus.badRequest
+            ..headers.contentType = ContentType.json
+            ..write('{"error":"url is required"}')
+            ..close();
+          return;
+        }
+
+        final title = data['title'] as String?;
+        final startPosition = (data['startPosition'] as num?)?.toDouble() ?? 0;
+        final onComplete = data['onComplete'] as Map<String, dynamic>?;
+
+        await player.play(
+          url: url,
+          title: title,
+          startPosition: startPosition,
+          onComplete: onComplete,
+        );
+
+        request.response
+          ..headers.contentType = ContentType.json
+          ..write('{"status":"playing","position":${startPosition.toStringAsFixed(1)}}')
+          ..close();
+      } catch (e) {
+        request.response
+          ..statusCode = HttpStatus.badRequest
+          ..headers.contentType = ContentType.json
+          ..write('{"error":"Invalid request: $e"}')
+          ..close();
+      }
+    } else if (path == '/api/player/status' && request.method == 'GET') {
+      final status = player.getStatus();
+      request.response
+        ..headers.contentType = ContentType.json
+        ..write(jsonEncode(status))
+        ..close();
+    } else if (path == '/api/player/stop' && request.method == 'POST') {
+      await player.stop();
+      request.response
+        ..headers.contentType = ContentType.json
+        ..write('{"status":"ok"}')
+        ..close();
+    } else {
+      request.response
+        ..statusCode = HttpStatus.notFound
+        ..headers.contentType = ContentType.json
+        ..write('{"error":"Unknown player endpoint"}')
+        ..close();
+    }
+  }
+
   Future<void> stop() async {
     await _server?.close();
     _server = null;
@@ -636,6 +1017,7 @@ class _LauncherHomeState extends State<LauncherHome> {
     super.initState();
     _enterFullscreen();
     _loadApps();
+    _server.setAppsProvider(() => apps);
     _server.start();
   }
 

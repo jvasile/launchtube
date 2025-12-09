@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Launch Tube Loader
 // @namespace    com.launchtube
-// @version      1.4
+// @version      2.0
 // @description  Loads service-specific scripts from Launch Tube app
 // @match        *://*/*
 // @grant        GM.xmlHttpRequest
@@ -43,94 +43,14 @@
         });
     }
 
-    // Map hostnames to service IDs
-    const SERVICE_MAP = {
-        'tv.apple.com': 'appletv',
-        'britbox.com': 'britbox',
-        'www.britbox.com': 'britbox',
-        'crackle.com': 'crackle',
-        'www.crackle.com': 'crackle',
-        'crunchyroll.com': 'crunchyroll',
-        'www.crunchyroll.com': 'crunchyroll',
-        'curiositystream.com': 'curiosity',
-        'www.curiositystream.com': 'curiosity',
-        'disneyplus.com': 'disney',
-        'www.disneyplus.com': 'disney',
-        'espn.com': 'espn',
-        'www.espn.com': 'espn',
-        'hulu.com': 'hulu',
-        'www.hulu.com': 'hulu',
-        'max.com': 'max',
-        'play.max.com': 'max',
-        'www.max.com': 'max',
-        'plus.nasa.gov': 'nasaplus',
-        'netflix.com': 'netflix',
-        'www.netflix.com': 'netflix',
-        'nfl.com': 'nfl',
-        'www.nfl.com': 'nfl',
-        'paramountplus.com': 'paramount',
-        'www.paramountplus.com': 'paramount',
-        'pbs.org': 'pbs',
-        'www.pbs.org': 'pbs',
-        'peacocktv.com': 'peacock',
-        'www.peacocktv.com': 'peacock',
-        'pluto.tv': 'pluto-tv',
-        'www.pluto.tv': 'pluto-tv',
-        'primevideo.com': 'prime',
-        'www.primevideo.com': 'prime',
-        'amazon.com': 'prime', // for /video paths
-        'www.amazon.com': 'prime',
-        'soundcloud.com': 'soundcloud',
-        'www.soundcloud.com': 'soundcloud',
-        'spotify.com': 'spotify',
-        'open.spotify.com': 'spotify',
-        'tubitv.com': 'tubi',
-        'www.tubitv.com': 'tubi',
-        'youtube.com': 'youtube',
-        'www.youtube.com': 'youtube',
-        'music.youtube.com': 'youtube-music',
-    };
-
-
-    // Detect service from current hostname
-    function detectService() {
-        const hostname = location.hostname;
-
-        // Direct match
-        if (SERVICE_MAP[hostname]) {
-            // Special case for Amazon - only match video paths
-            if (hostname.includes('amazon.com') && !location.pathname.startsWith('/video')) {
-                return null;
-            }
-            return SERVICE_MAP[hostname];
-        }
-
-        // Try without www
-        const noWww = hostname.replace(/^www\./, '');
-        if (SERVICE_MAP[noWww]) {
-            return SERVICE_MAP[noWww];
-        }
-
-        // Try matching domain suffix
-        for (const [domain, serviceId] of Object.entries(SERVICE_MAP)) {
-            if (hostname.endsWith('.' + domain) || hostname === domain) {
-                return serviceId;
-            }
-        }
-
-        return null;
-    }
-
     // Try to connect to a specific port
     async function tryPort(port) {
-        console.log(`Launch Tube: Trying port ${port}...`);
         try {
             const response = await gmFetch({
                 method: 'GET',
                 url: `http://localhost:${port}/api/ping`,
                 timeout: 1000,
             });
-            console.log(`Launch Tube: Port ${port} response: ${response.status}`);
             if (response.status === 200) {
                 const data = JSON.parse(response.responseText);
                 if (data.app === 'launchtube') {
@@ -138,7 +58,7 @@
                 }
             }
         } catch (e) {
-            console.log(`Launch Tube: Port ${port} failed:`, e);
+            // Port not available
         }
         throw new Error('Not Launch Tube');
     }
@@ -155,43 +75,33 @@
         return null;
     }
 
-    // Fetch and execute the service script
-    async function loadServiceScript(port, serviceId) {
+    // Ask server to match current URL and return script
+    async function loadScript(port) {
         try {
             const response = await gmFetch({
                 method: 'GET',
-                url: `http://localhost:${port}/api/service/${serviceId}`,
+                url: `http://localhost:${port}/api/match?url=${encodeURIComponent(location.href)}`,
             });
             if (response.status === 200 && response.responseText) {
                 const script = document.createElement('script');
                 script.textContent = response.responseText;
+                // Make the port available to the script
+                script.textContent = `window.LAUNCH_TUBE_PORT = ${port};\n` + script.textContent;
                 (document.head || document.documentElement).appendChild(script);
-                console.log(`Launch Tube: Loaded script for ${serviceId}`);
-            } else {
-                console.log(`Launch Tube: No script found for ${serviceId}`);
+                console.log('Launch Tube: Loaded script for', location.hostname);
             }
         } catch (e) {
-            console.error(`Launch Tube: Failed to load script for ${serviceId}:`, e);
+            console.error('Launch Tube: Failed to load script:', e);
         }
     }
 
     // Main entry point
     async function main() {
-        const serviceId = detectService();
-        console.log(`Launch Tube: Detected service: ${serviceId} (hostname: ${location.hostname})`);
-
-        if (!serviceId) {
-            return; // Not a recognized service
-        }
-
         const port = await findServer();
         if (!port) {
-            console.log('Launch Tube: Server not found');
-            return;
+            return; // Server not running
         }
-
-        console.log(`Launch Tube: Found server on port ${port}, loading script for ${serviceId}`);
-        loadServiceScript(port, serviceId);
+        loadScript(port);
     }
 
     main();

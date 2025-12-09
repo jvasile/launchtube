@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Icon logo with orange-to-red gradient circle outline -->
+  <defs>
+    <linearGradient id="bgIcon" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a1a2e"/>
+      <stop offset="100%" style="stop-color:#16213e"/>
+    </linearGradient>
+    <linearGradient id="circleGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#ff9800"/>
+      <stop offset="100%" style="stop-color:#e53935"/>
+    </linearGradient>
+    <linearGradient id="flameIcon" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffffff"/>
+      <stop offset="15%" style="stop-color:#ffffaa"/>
+      <stop offset="35%" style="stop-color:#f7c242"/>
+      <stop offset="60%" style="stop-color:#ff6b35"/>
+      <stop offset="100%" style="stop-color:#ff3333" stop-opacity="0.3"/>
+    </linearGradient>
+    <linearGradient id="flameShockIcon" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffffff"/>
+      <stop offset="50%" style="stop-color:#ffff88"/>
+      <stop offset="100%" style="stop-color:#f7c242"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background circle -->
+  <circle cx="256" cy="256" r="240" fill="none" stroke="url(#circleGradient)" stroke-width="6" opacity="0.6"/>
+
+  <!-- Retro TV - Orange -->
+  <rect x="156" y="80" width="200" height="150" rx="20" fill="#ff9800"/>
+  <rect x="176" y="100" width="130" height="110" rx="10" fill="#1a1a2e"/>
+  <rect x="186" y="110" width="110" height="90" rx="6" fill="#ffb74d"/>
+
+  <!-- Rabbit ear antennas -->
+  <line x1="200" y1="80" x2="160" y2="30" stroke="#ff9800" stroke-width="8" stroke-linecap="round"/>
+  <line x1="312" y1="80" x2="352" y2="30" stroke="#ff9800" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="160" cy="30" r="12" fill="#ff9800"/>
+  <circle cx="352" cy="30" r="12" fill="#ff9800"/>
+
+  <!-- TV knobs -->
+  <circle cx="326" cy="140" r="15" fill="#1a1a2e"/>
+  <circle cx="326" cy="180" r="12" fill="#1a1a2e"/>
+
+  <!-- Play icon -->
+  <polygon points="220,135 220,175 260,155" fill="#fff" opacity="0.9"/>
+
+  <!-- TV legs -->
+  <rect x="180" y="230" width="16" height="30" rx="4" fill="#ff9800"/>
+  <rect x="304" y="230" width="16" height="30" rx="4" fill="#ff9800"/>
+
+  <!-- Cone plume -->
+  <path d="M230 260 L282 260 L320 360 L340 480 L172 480 L192 360 Z" fill="url(#flameIcon)" opacity="0.9"/>
+
+  <!-- Mach diamonds -->
+  <polygon points="256,280 245,310 256,340 267,310" fill="url(#flameShockIcon)"/>
+  <polygon points="256,350 248,375 256,400 264,375" fill="url(#flameShockIcon)" opacity="0.8"/>
+  <polygon points="256,410 250,430 256,450 262,430" fill="url(#flameShockIcon)" opacity="0.6"/>
+
+  <!-- Core stream -->
+  <path d="M248 260 L264 260 L275 350 L280 480 L232 480 L237 350 Z" fill="#ffffff" opacity="0.5"/>
+</svg>

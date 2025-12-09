@@ -223,6 +223,83 @@ class ServiceLibraryLoader {
   }
 }
 
+// Per-service key/value storage for userscripts
+class ServiceDataStore {
+  static ServiceDataStore? _instance;
+  Map<String, Map<String, dynamic>> _data = {};
+  String? _filePath;
+  bool _dirty = false;
+
+  static Future<ServiceDataStore> getInstance() async {
+    if (_instance == null) {
+      _instance = ServiceDataStore();
+      await _instance!._load();
+    }
+    return _instance!;
+  }
+
+  Future<void> _load() async {
+    final appDir = await getApplicationSupportDirectory();
+    _filePath = '${appDir.path}/service_data.json';
+    final file = File(_filePath!);
+    if (await file.exists()) {
+      try {
+        final contents = await file.readAsString();
+        final decoded = jsonDecode(contents) as Map<String, dynamic>;
+        _data = decoded.map((k, v) => MapEntry(k, Map<String, dynamic>.from(v as Map)));
+      } catch (e) {
+        debugPrint('Failed to load service data: $e');
+        _data = {};
+      }
+    }
+  }
+
+  Future<void> _save() async {
+    if (_filePath == null || !_dirty) return;
+    try {
+      final file = File(_filePath!);
+      await file.writeAsString(jsonEncode(_data));
+      _dirty = false;
+    } catch (e) {
+      debugPrint('Failed to save service data: $e');
+    }
+  }
+
+  Map<String, dynamic> getAll(String serviceId) {
+    return Map<String, dynamic>.from(_data[serviceId] ?? {});
+  }
+
+  dynamic get(String serviceId, String key) {
+    return _data[serviceId]?[key];
+  }
+
+  Future<void> set(String serviceId, String key, dynamic value) async {
+    _data[serviceId] ??= {};
+    _data[serviceId]![key] = value;
+    _dirty = true;
+    await _save();
+  }
+
+  Future<void> delete(String serviceId, String key) async {
+    if (_data[serviceId] != null) {
+      _data[serviceId]!.remove(key);
+      if (_data[serviceId]!.isEmpty) {
+        _data.remove(serviceId);
+      }
+      _dirty = true;
+      await _save();
+    }
+  }
+
+  Future<void> deleteAll(String serviceId) async {
+    if (_data.containsKey(serviceId)) {
+      _data.remove(serviceId);
+      _dirty = true;
+      await _save();
+    }
+  }
+}
+
 // HTTP server for serving userscripts to browser extensions
 class LaunchTubeServer {
   HttpServer? _server;
@@ -248,7 +325,7 @@ class LaunchTubeServer {
   void _handleRequest(HttpRequest request) async {
     // Add CORS headers for browser access
     request.response.headers.add('Access-Control-Allow-Origin', '*');
-    request.response.headers.add('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    request.response.headers.add('Access-Control-Allow-Methods', 'GET, PUT, DELETE, OPTIONS');
     request.response.headers.add('Access-Control-Allow-Headers', '*');
     request.response.headers.add('Cache-Control', 'no-cache, must-revalidate');
 
@@ -283,6 +360,29 @@ class LaunchTubeServer {
         ..close();
       // Exit the application after responding
       Future.delayed(const Duration(milliseconds: 100), () => exit(0));
+    } else if (request.uri.path == '/api/status') {
+      // Status endpoint with server info
+      final status = jsonEncode({
+        'status': 'ok',
+        'app': 'launchtube',
+        'port': _port,
+        'endpoints': [
+          '/api/ping',
+          '/api/status',
+          '/api/shutdown',
+          '/api/service/{serviceId}',
+          '/api/kv/{serviceId}',
+          '/api/kv/{serviceId}/{key}',
+          '/install',
+          '/launchtube-loader.user.js',
+        ],
+      });
+      request.response
+        ..headers.contentType = ContentType.json
+        ..write(status)
+        ..close();
+    } else if (request.uri.path.startsWith('/api/kv/')) {
+      await _handleKvRequest(request);
     } else {
       request.response
         ..statusCode = HttpStatus.notFound
@@ -378,6 +478,100 @@ class LaunchTubeServer {
       await Process.start('xdg-open', [url], mode: ProcessStartMode.detached);
     } else if (Platform.isWindows) {
       await Process.start('start', [url], mode: ProcessStartMode.detached, runInShell: true);
+    }
+  }
+
+  Future<void> _handleKvRequest(HttpRequest request) async {
+    // Parse path: /api/kv/{serviceId} or /api/kv/{serviceId}/{key}
+    final pathParts = request.uri.path.split('/').where((p) => p.isNotEmpty).toList();
+    // pathParts: ['api', 'kv', serviceId, ?key]
+
+    if (pathParts.length < 3) {
+      request.response
+        ..statusCode = HttpStatus.badRequest
+        ..headers.contentType = ContentType.json
+        ..write('{"error":"Invalid path"}')
+        ..close();
+      return;
+    }
+
+    final serviceId = pathParts[2];
+    final key = pathParts.length > 3 ? pathParts[3] : null;
+    final store = await ServiceDataStore.getInstance();
+
+    switch (request.method) {
+      case 'GET':
+        if (key != null) {
+          // GET /api/kv/{serviceId}/{key}
+          final value = store.get(serviceId, key);
+          if (value != null) {
+            request.response
+              ..headers.contentType = ContentType.json
+              ..write(jsonEncode(value))
+              ..close();
+          } else {
+            request.response
+              ..statusCode = HttpStatus.notFound
+              ..headers.contentType = ContentType.json
+              ..write('{"error":"Key not found"}')
+              ..close();
+          }
+        } else {
+          // GET /api/kv/{serviceId}
+          final data = store.getAll(serviceId);
+          request.response
+            ..headers.contentType = ContentType.json
+            ..write(jsonEncode(data))
+            ..close();
+        }
+        break;
+
+      case 'PUT':
+        if (key == null) {
+          request.response
+            ..statusCode = HttpStatus.badRequest
+            ..headers.contentType = ContentType.json
+            ..write('{"error":"Key required for PUT"}')
+            ..close();
+          return;
+        }
+        try {
+          final body = await utf8.decoder.bind(request).join();
+          final value = jsonDecode(body);
+          await store.set(serviceId, key, value);
+          request.response
+            ..headers.contentType = ContentType.json
+            ..write('{"status":"ok"}')
+            ..close();
+        } catch (e) {
+          request.response
+            ..statusCode = HttpStatus.badRequest
+            ..headers.contentType = ContentType.json
+            ..write('{"error":"Invalid JSON body"}')
+            ..close();
+        }
+        break;
+
+      case 'DELETE':
+        if (key != null) {
+          // DELETE /api/kv/{serviceId}/{key}
+          await store.delete(serviceId, key);
+        } else {
+          // DELETE /api/kv/{serviceId}
+          await store.deleteAll(serviceId);
+        }
+        request.response
+          ..headers.contentType = ContentType.json
+          ..write('{"status":"ok"}')
+          ..close();
+        break;
+
+      default:
+        request.response
+          ..statusCode = HttpStatus.methodNotAllowed
+          ..headers.contentType = ContentType.json
+          ..write('{"error":"Method not allowed"}')
+          ..close();
     }
   }
 

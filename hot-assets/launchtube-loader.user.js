@@ -97,10 +97,13 @@
 
     // Main entry point
     async function main() {
+        console.log('Launch Tube: Loader running on', location.hostname);
         const port = await findServer();
         if (!port) {
-            return; // Server not running
+            console.log('Launch Tube: Server not found on ports', PORTS.join(', '));
+            return;
         }
+        console.log('Launch Tube: Found server on port', port);
         loadScript(port);
     }
 

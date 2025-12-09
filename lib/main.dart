@@ -77,6 +77,53 @@ class AppConfig {
 
 final List<AppConfig> defaultApps = [];
 
+// Browser detection and selection
+class BrowserInfo {
+  final String name;
+  final String executable;
+  final String kioskFlag;
+
+  const BrowserInfo({
+    required this.name,
+    required this.executable,
+    required this.kioskFlag,
+  });
+
+  static const List<BrowserInfo> _knownBrowsers = [
+    BrowserInfo(name: 'Firefox', executable: 'firefox', kioskFlag: '--kiosk'),
+    BrowserInfo(name: 'Firefox', executable: 'firefox.exe', kioskFlag: '--kiosk'),
+    BrowserInfo(name: 'Chrome', executable: 'google-chrome', kioskFlag: '--kiosk'),
+    BrowserInfo(name: 'Chrome', executable: 'google-chrome-stable', kioskFlag: '--kiosk'),
+    BrowserInfo(name: 'Chrome', executable: 'chrome', kioskFlag: '--kiosk'),
+    BrowserInfo(name: 'Chrome', executable: 'chrome.exe', kioskFlag: '--kiosk'),
+    BrowserInfo(name: 'Chromium', executable: 'chromium', kioskFlag: '--kiosk'),
+    BrowserInfo(name: 'Chromium', executable: 'chromium-browser', kioskFlag: '--kiosk'),
+    BrowserInfo(name: 'Chromium', executable: 'chromium.exe', kioskFlag: '--kiosk'),
+  ];
+
+  static Future<List<BrowserInfo>> detectBrowsers() async {
+    final found = <BrowserInfo>[];
+    for (final browser in _knownBrowsers) {
+      if (await _isExecutableAvailable(browser.executable)) {
+        found.add(browser);
+      }
+    }
+    return found;
+  }
+
+  static Future<bool> _isExecutableAvailable(String executable) async {
+    try {
+      final result = await Process.run(
+        Platform.isWindows ? 'where' : 'which',
+        [executable],
+      );
+      return result.exitCode == 0;
+    } catch (_) {
+      return false;
+    }
+  }
+}
+
 // Service library for pre-configured streaming services
 class ServiceTemplate {
   final String name;
@@ -1287,13 +1334,56 @@ class _LauncherHomeState extends State<LauncherHome> {
   final FocusNode _focusNode = FocusNode();
   final LaunchTubeServer _server = LaunchTubeServer();
 
+  // Browser selection
+  List<BrowserInfo> _availableBrowsers = [];
+  String? _selectedBrowser; // executable name
+
   @override
   void initState() {
     super.initState();
     _enterFullscreen();
     _loadApps();
+    _detectBrowsers();
     _server.setAppsProvider(() => apps);
     _server.start();
+  }
+
+  Future<void> _detectBrowsers() async {
+    final browsers = await BrowserInfo.detectBrowsers();
+    final savedBrowser = await _loadSelectedBrowser();
+    setState(() {
+      _availableBrowsers = browsers;
+      // Use saved browser if still available, otherwise first detected
+      if (savedBrowser != null && browsers.any((b) => b.executable == savedBrowser)) {
+        _selectedBrowser = savedBrowser;
+      } else if (browsers.isNotEmpty) {
+        _selectedBrowser = browsers.first.executable;
+      }
+    });
+  }
+
+  Future<String> get _browserConfigPath async {
+    final directory = await getApplicationSupportDirectory();
+    return '${directory.path}/browser.txt';
+  }
+
+  Future<String?> _loadSelectedBrowser() async {
+    try {
+      final path = await _browserConfigPath;
+      final file = File(path);
+      if (await file.exists()) {
+        return (await file.readAsString()).trim();
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  Future<void> _saveSelectedBrowser() async {
+    if (_selectedBrowser == null) return;
+    try {
+      final path = await _browserConfigPath;
+      await File(path).writeAsString(_selectedBrowser!);
+    } catch (_) {}
   }
 
   @override
@@ -1348,17 +1438,19 @@ class _LauncherHomeState extends State<LauncherHome> {
   void _launchApp(AppConfig app) async {
     try {
       if (app.type == AppType.website) {
-        final firefoxArgs = <String>[];
+        if (_selectedBrowser == null) {
+          throw Exception('No browser available');
+        }
+        final browser = _availableBrowsers.firstWhere(
+          (b) => b.executable == _selectedBrowser,
+        );
+        final args = <String>[];
         if (app.kioskMode) {
-          firefoxArgs.add('--kiosk');
+          args.add(browser.kioskFlag);
         }
-        firefoxArgs.add(app.url!);
+        args.add(app.url!);
 
-        if (Platform.isLinux) {
-          await Process.start('firefox', firefoxArgs, mode: ProcessStartMode.detached);
-        } else if (Platform.isWindows) {
-          await Process.start('firefox.exe', firefoxArgs, mode: ProcessStartMode.detached);
-        }
+        await Process.start(browser.executable, args, mode: ProcessStartMode.detached);
       } else {
         final parts = app.commandLine!.split(' ').where((s) => s.isNotEmpty).toList();
         final command = parts.first;
@@ -1491,6 +1583,53 @@ class _LauncherHomeState extends State<LauncherHome> {
     _showConfigDialog(apps[index].copy(), isNew: false, index: index);
   }
 
+  void _showBrowserSelector() {
+    if (_availableBrowsers.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No browsers found'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        title: const Text('Select Browser', style: TextStyle(color: Colors.white)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: _availableBrowsers.map((browser) {
+            return RadioListTile<String>(
+              title: Text(
+                '${browser.name} (${browser.executable})',
+                style: const TextStyle(color: Colors.white),
+              ),
+              value: browser.executable,
+              groupValue: _selectedBrowser,
+              activeColor: Colors.blue,
+              onChanged: (value) {
+                setState(() {
+                  _selectedBrowser = value;
+                });
+                _saveSelectedBrowser();
+                Navigator.of(context).pop();
+              },
+            );
+          }).toList(),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showConfigDialog(AppConfig app, {required bool isNew, int? index}) {
     showDialog(
       context: context,
@@ -1549,9 +1688,24 @@ class _LauncherHomeState extends State<LauncherHome> {
                           case 'install_userscript':
                             _server.openUserscriptInstall();
                             break;
+                          case 'select_browser':
+                            _showBrowserSelector();
+                            break;
                         }
                       },
                       itemBuilder: (context) => [
+                        PopupMenuItem(
+                          value: 'select_browser',
+                          child: Row(
+                            children: [
+                              const Icon(Icons.web, color: Colors.white70),
+                              const SizedBox(width: 12),
+                              Text(_selectedBrowser != null
+                                  ? 'Browser: ${_availableBrowsers.firstWhere((b) => b.executable == _selectedBrowser).name}'
+                                  : 'Select Browser'),
+                            ],
+                          ),
+                        ),
                         const PopupMenuItem(
                           value: 'install_userscript',
                           child: Row(

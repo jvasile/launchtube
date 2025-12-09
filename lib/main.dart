@@ -141,34 +141,42 @@ class ServiceLibraryLoader {
 
   static Future<List<ServiceTemplate>> _loadBundledServices() async {
     final services = <ServiceTemplate>[];
+    final dataDir = getAssetDirectory();
+    final servicesDir = '$dataDir/services';
 
     try {
-      // Load manifest to get list of bundled services
-      final manifestJson = await rootBundle.loadString('assets/services/manifest.json');
+      // Load manifest to get list of services
+      final manifestFile = File('$servicesDir/manifest.json');
+      if (!await manifestFile.exists()) {
+        debugPrint('No service manifest found at $servicesDir/manifest.json');
+        return services;
+      }
+
+      final manifestJson = await manifestFile.readAsString();
       final manifest = List<String>.from(jsonDecode(manifestJson));
 
       for (final serviceId in manifest) {
         try {
-          final jsonStr = await rootBundle.loadString('assets/services/$serviceId.json');
+          final configFile = File('$servicesDir/$serviceId.json');
+          if (!await configFile.exists()) continue;
+
+          final jsonStr = await configFile.readAsString();
           final json = jsonDecode(jsonStr) as Map<String, dynamic>;
 
           // Check for logo file (try common extensions)
           String? logoPath;
-          for (final ext in ['png', 'jpg', 'jpeg']) {
-            try {
-              // Try to load to verify it exists
-              await rootBundle.load('assets/services/$serviceId.$ext');
-              logoPath = 'assets/services/$serviceId.$ext';
+          for (final ext in ['png', 'jpg', 'jpeg', 'svg']) {
+            final logoFile = File('$servicesDir/$serviceId.$ext');
+            if (await logoFile.exists()) {
+              logoPath = logoFile.path;
               break;
-            } catch (_) {
-              // Logo with this extension doesn't exist
             }
           }
 
-          services.add(ServiceTemplate.fromJson(json, logoPath, true));
+          services.add(ServiceTemplate.fromJson(json, logoPath, false));
         } catch (e) {
           // Skip invalid service files
-          debugPrint('Failed to load bundled service $serviceId: $e');
+          debugPrint('Failed to load service $serviceId: $e');
         }
       }
     } catch (e) {
@@ -297,6 +305,89 @@ class ServiceDataStore {
       _dirty = true;
       await _save();
     }
+  }
+}
+
+// Data directory for runtime assets
+String? _cachedAssetDir;
+
+String getAssetDirectory() {
+  if (_cachedAssetDir != null) return _cachedAssetDir!;
+
+  // First, try ~/.local/share/launchtube/assets
+  final home = Platform.environment['HOME'];
+  final userDir = '$home/.local/share/launchtube/assets';
+  if (Directory(userDir).existsSync()) {
+    print('Using asset directory: $userDir');
+    _cachedAssetDir = userDir;
+    return userDir;
+  }
+
+  // Fallback: look for data/ directory in parent directories of the binary
+  // This enables running from source
+  final exePath = Platform.resolvedExecutable;
+  var dir = Directory(exePath).parent;
+  for (var i = 0; i < 5; i++) {
+    final dataDir = Directory('${dir.path}/data');
+    if (dataDir.existsSync()) {
+      print('Using asset directory: ${dataDir.path}');
+      _cachedAssetDir = dataDir.path;
+      return dataDir.path;
+    }
+    dir = dir.parent;
+  }
+
+  // Default to user dir even if it doesn't exist
+  print('Asset directory not found, defaulting to: $userDir');
+  _cachedAssetDir = userDir;
+  return userDir;
+}
+
+// File cache with mtime-based hot-reload
+class _CachedFile {
+  final Uint8List bytes;
+  final DateTime mtime;
+  _CachedFile(this.bytes, this.mtime);
+}
+
+class FileCache {
+  static FileCache? _instance;
+  final Map<String, _CachedFile> _cache = {};
+
+  static FileCache getInstance() {
+    _instance ??= FileCache();
+    return _instance!;
+  }
+
+  Future<Uint8List?> getBytes(String path) async {
+    final file = File(path);
+    if (!await file.exists()) {
+      _cache.remove(path);
+      return null;
+    }
+
+    final stat = await file.stat();
+    final mtime = stat.modified;
+
+    final cached = _cache[path];
+    if (cached != null && cached.mtime == mtime) {
+      return cached.bytes;
+    }
+
+    // File changed or not cached - reload
+    final bytes = await file.readAsBytes();
+    _cache[path] = _CachedFile(bytes, mtime);
+    return bytes;
+  }
+
+  Future<String?> getString(String path) async {
+    final bytes = await getBytes(path);
+    if (bytes == null) return null;
+    return utf8.decode(bytes);
+  }
+
+  DateTime? getMtime(String path) {
+    return _cache[path]?.mtime;
   }
 }
 
@@ -653,18 +744,26 @@ class LaunchTubeServer {
   }
 
   Future<void> _serveServiceScript(HttpRequest request, String serviceId) async {
-    try {
-      final script = await rootBundle.loadString('assets/services/$serviceId.js');
-      request.response
-        ..headers.contentType = ContentType('application', 'javascript', charset: 'utf-8')
-        ..write(script)
-        ..close();
-    } catch (_) {
+    final dataDir = getAssetDirectory();
+    final scriptPath = '$dataDir/services/$serviceId.js';
+    final cache = FileCache.getInstance();
+
+    final script = await cache.getString(scriptPath);
+    if (script == null) {
       request.response
         ..statusCode = HttpStatus.notFound
         ..write('// Script not found for service: $serviceId')
         ..close();
+      return;
     }
+
+    final mtime = cache.getMtime(scriptPath);
+    request.response
+      ..headers.contentType = ContentType('application', 'javascript', charset: 'utf-8')
+      ..headers.add('Cache-Control', 'max-age=31536000')
+      ..headers.add('ETag', '"${mtime?.millisecondsSinceEpoch ?? 0}"')
+      ..write(script)
+      ..close();
   }
 
   Future<void> _handleMatchRequest(HttpRequest request) async {
@@ -718,18 +817,26 @@ class LaunchTubeServer {
   }
 
   Future<void> _serveUserscript(HttpRequest request) async {
-    try {
-      final script = await rootBundle.loadString('assets/launchtube-loader.user.js');
-      request.response
-        ..headers.contentType = ContentType('application', 'javascript', charset: 'utf-8')
-        ..write(script)
-        ..close();
-    } catch (_) {
+    final dataDir = getAssetDirectory();
+    final scriptPath = '$dataDir/launchtube-loader.user.js';
+    final cache = FileCache.getInstance();
+
+    final script = await cache.getString(scriptPath);
+    if (script == null) {
       request.response
         ..statusCode = HttpStatus.notFound
         ..write('// Userscript not found')
         ..close();
+      return;
     }
+
+    final mtime = cache.getMtime(scriptPath);
+    request.response
+      ..headers.contentType = ContentType('application', 'javascript', charset: 'utf-8')
+      ..headers.add('Cache-Control', 'max-age=31536000')
+      ..headers.add('ETag', '"${mtime?.millisecondsSinceEpoch ?? 0}"')
+      ..write(script)
+      ..close();
   }
 
   Future<void> _serveInstallPage(HttpRequest request) async {

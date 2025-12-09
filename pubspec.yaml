@@ -61,11 +61,10 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
+  # Assets are loaded from ~/.local/share/launchtube/ at runtime
   # To add assets to your application, add an assets section, like this:
-  assets:
-    - assets/
-    - assets/images/launch-tube-logo/
-    - assets/services/
+  # assets:
+  #   - assets/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

@@ -8,9 +8,10 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // Log asset directory at startup
+  // Initialize app support dir, then log asset directory at startup
+  await _getAppSupportDir();
   getAssetDirectory();
   runApp(const LaunchTubeApp());
 }
@@ -312,13 +313,22 @@ class ServiceDataStore {
 
 // Data directory for runtime assets
 String? _cachedAssetDir;
+String? _appSupportDir;
+
+Future<String> _getAppSupportDir() async {
+  _appSupportDir ??= (await getApplicationSupportDirectory()).path;
+  return _appSupportDir!;
+}
 
 String getAssetDirectory() {
   if (_cachedAssetDir != null) return _cachedAssetDir!;
 
-  // First, try ~/.local/share/launchtube/assets
+  // First, try <app-support-dir>/assets (e.g. ~/.local/share/launchtube/assets)
+  // But we can't await here, so check synchronously using the cached value or HOME fallback
   final home = Platform.environment['HOME'];
-  final userDir = '$home/.local/share/launchtube/assets';
+  final userDir = _appSupportDir != null
+      ? '$_appSupportDir/assets'
+      : '$home/.local/share/launchtube/assets';
   if (Directory(userDir).existsSync()) {
     print('Using asset directory: $userDir');
     _cachedAssetDir = userDir;

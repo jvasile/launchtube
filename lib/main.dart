@@ -512,9 +512,10 @@ class _LauncherHomeState extends State<LauncherHome> {
       child: Scaffold(
         body: SafeArea(
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               const SizedBox(height: 40),
-              Image.asset('assets/images/launch-tube-logo/logo_wide.png', height: 100),
+              Center(child: Image.asset('assets/images/launch-tube-logo/logo_wide.png', height: 100)),
               const Spacer(),
               LayoutBuilder(
                 builder: (context, constraints) {

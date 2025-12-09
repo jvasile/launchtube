@@ -128,12 +128,16 @@
     }
 
     function startStatusPolling() {
-        pollInterval = setInterval(async () => {
-            try {
-                const response = await fetch(`${LAUNCH_TUBE_URL}/api/player/status`);
-                const status = await response.json();
+        // Wait a bit before first poll to give mpv time to start
+        setTimeout(() => {
+            pollInterval = setInterval(async () => {
+                try {
+                    const response = await fetch(`${LAUNCH_TUBE_URL}/api/player/status`);
+                    const status = await response.json();
+                    console.log('Launch Tube: Poll status:', status);
 
                 if (!status.playing) {
+                    console.log('Launch Tube: Player stopped, hiding modal');
                     hideModal(false);
                 } else {
                     if (status.position !== undefined && status.duration !== undefined && status.duration > 0) {
@@ -152,6 +156,7 @@
                 hideModal(false);
             }
         }, 1000);
+        }, 2000); // Initial delay before first poll
     }
 
     // Get Jellyfin auth info from ApiClient
@@ -179,42 +184,124 @@
         return `${serverUrl}/Videos/${itemId}/stream?static=true&api_key=${encodeURIComponent(token)}`;
     }
 
-    // Play item in external player
-    async function playExternal(itemId, startPositionTicks = 0) {
+    // Build onComplete callback for an item
+    function buildOnComplete(itemId, mediaSourceId) {
         const { serverUrl, token } = getServerInfo();
+        return {
+            url: `${serverUrl}/Sessions/Playing/Stopped`,
+            method: 'POST',
+            headers: { 'X-Emby-Token': token },
+            bodyTemplate: {
+                ItemId: itemId,
+                MediaSourceId: mediaSourceId || itemId,
+                PositionTicks: '${positionTicks}',
+            },
+        };
+    }
 
-        showModal('Launching player...');
+    // Video types we should play externally
+    const VIDEO_TYPES = ['Movie', 'Episode', 'MusicVideo', 'Video', 'Trailer'];
+    // Container types that expand into playlists
+    const CONTAINER_TYPES = ['Season', 'Series', 'Playlist', 'BoxSet'];
+
+    // Fetch child episodes for a container
+    async function getChildEpisodes(itemId) {
+        const { serverUrl, userId, token } = getServerInfo();
+        if (!userId || !token) throw new Error('Not authenticated');
+
+        let url = `${serverUrl}/Users/${userId}/Items?api_key=${encodeURIComponent(token)}`;
+        url += `&ParentId=${encodeURIComponent(itemId)}`;
+        url += `&IncludeItemTypes=Episode`;
+        url += `&Recursive=true`;
+        url += `&SortBy=SortName`;
+        url += `&SortOrder=Ascending`;
+        url += `&Fields=Path,MediaSources`;
+
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`API error: ${response.status}`);
+        const data = await response.json();
+        return data.Items || [];
+    }
+
+    // Play a playlist of items
+    async function playPlaylist(items, startPositionTicks = 0) {
+        if (!items || items.length === 0) return false;
+
+        showModal(`Loading playlist (${items.length} items)...`);
 
         try {
-            const item = await getItemDetails(itemId);
-            const title = item.Name || 'Jellyfin Video';
-            const streamUrl = buildStreamUrl(itemId);
+            const playlistItems = items.map(item => ({
+                url: buildStreamUrl(item.Id),
+                itemId: item.Id,
+                onComplete: buildOnComplete(item.Id, item.MediaSources?.[0]?.Id),
+            }));
+
             const startPosition = startPositionTicks / 10000000;
 
-            // Build onComplete callback to save progress back to Jellyfin
-            const onComplete = {
-                url: `${serverUrl}/Sessions/Playing/Stopped`,
-                method: 'POST',
-                headers: { 'X-Emby-Token': token },
-                bodyTemplate: {
-                    ItemId: itemId,
-                    MediaSourceId: item.MediaSources?.[0]?.Id || itemId,
-                    PositionTicks: '${positionTicks}',
-                },
-            };
+            console.log('Launch Tube: Playing playlist:', playlistItems.length, 'items');
 
-            console.log('Launch Tube: Playing in external player:', { streamUrl, title, startPosition });
-
-            const response = await fetch(`${LAUNCH_TUBE_URL}/api/player/play`, {
+            const response = await fetch(`${LAUNCH_TUBE_URL}/api/player/playlist`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url: streamUrl, title, startPosition, onComplete }),
+                body: JSON.stringify({ items: playlistItems, startPosition }),
             });
 
             if (!response.ok) throw new Error(`Player API error: ${response.status}`);
-            console.log('Launch Tube: Player started');
-            updateModalStatus('Playing...');
+            console.log('Launch Tube: Playlist started');
+            updateModalStatus(`Playing 1 of ${items.length}...`);
             return true;
+        } catch (e) {
+            console.error('Launch Tube: Failed to play playlist:', e);
+            updateModalStatus('Failed to start player: ' + e.message);
+            setTimeout(() => hideModal(false), 3000);
+            return false;
+        }
+    }
+
+    // Play item(s) in external player - handles single items and containers
+    async function playExternal(itemId, startPositionTicks = 0) {
+        showModal('Loading...');
+
+        try {
+            const item = await getItemDetails(itemId);
+            console.log('Launch Tube: Item type:', item.Type, 'Name:', item.Name);
+
+            // Container types - expand to playlist
+            if (CONTAINER_TYPES.includes(item.Type)) {
+                const episodes = await getChildEpisodes(itemId);
+                if (episodes.length > 0) {
+                    console.log('Launch Tube: Expanded container to', episodes.length, 'episodes');
+                    return await playPlaylist(episodes, startPositionTicks);
+                } else {
+                    throw new Error('No episodes found');
+                }
+            }
+
+            // Video types - play single item
+            if (VIDEO_TYPES.includes(item.Type)) {
+                const streamUrl = buildStreamUrl(itemId);
+                const title = item.Name || 'Jellyfin Video';
+                const startPosition = startPositionTicks / 10000000;
+                const onComplete = buildOnComplete(itemId, item.MediaSources?.[0]?.Id);
+
+                console.log('Launch Tube: Playing single item:', { streamUrl, title, startPosition });
+
+                const response = await fetch(`${LAUNCH_TUBE_URL}/api/player/play`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: streamUrl, title, startPosition, onComplete }),
+                });
+
+                if (!response.ok) throw new Error(`Player API error: ${response.status}`);
+                console.log('Launch Tube: Player started');
+                updateModalStatus('Playing...');
+                return true;
+            }
+
+            // Unknown type - don't handle
+            console.log('Launch Tube: Skipping non-video type:', item.Type);
+            hideModal(false);
+            return false;
         } catch (e) {
             console.error('Launch Tube: Failed to play externally:', e);
             updateModalStatus('Failed to start player: ' + e.message);
@@ -312,9 +399,6 @@
                 document.querySelectorAll('.videoPlayerContainer, .videoOsdBottom, .videoOsd').forEach(el => {
                     el.style.display = 'none';
                 });
-
-                // Go back from player view
-                history.back();
 
                 if (itemId) {
                     try {
@@ -423,10 +507,92 @@
         document.head.appendChild(style);
     }
 
+    // Hook PlaybackManager.play to intercept before Jellyfin starts loading
+    function hookPlaybackManager() {
+        const script = document.createElement('script');
+        script.textContent = `
+        (function() {
+            let hooked = false;
+
+            function doHook(playbackManager) {
+                if (hooked) return;
+                const originalPlay = playbackManager.play.bind(playbackManager);
+                playbackManager.play = async function(options) {
+                    console.log('Launch Tube: Intercepted PlaybackManager.play', options);
+
+                    let itemId = null;
+                    if (options && options.ids && options.ids.length > 0) {
+                        itemId = options.ids[0];
+                    } else if (options && options.items && options.items.length > 0) {
+                        itemId = options.items[0].Id;
+                    }
+
+                    if (itemId) {
+                        const startPositionTicks = options && options.startPositionTicks ? options.startPositionTicks : 0;
+                        window.postMessage({
+                            type: 'launchtube-playback-manager',
+                            itemId: itemId,
+                            startPositionTicks: startPositionTicks
+                        }, '*');
+                        return; // Don't call original - prevents spinner
+                    }
+
+                    return originalPlay(options);
+                };
+                hooked = true;
+                console.log('Launch Tube: Hooked PlaybackManager.play');
+            }
+
+            function tryHook() {
+                if (window.PlaybackManager && window.PlaybackManager.play && !hooked) {
+                    doHook(window.PlaybackManager);
+                    return true;
+                }
+                return false;
+            }
+
+            if (!tryHook()) {
+                // Install trap to catch when PlaybackManager is set
+                if (typeof window.PlaybackManager === 'undefined' || window.PlaybackManager === null) {
+                    let _pm = undefined;
+                    Object.defineProperty(window, 'PlaybackManager', {
+                        get: function() { return _pm; },
+                        set: function(val) {
+                            _pm = val;
+                            if (val && val.play) doHook(val);
+                        },
+                        configurable: true
+                    });
+                }
+
+                // Also poll as fallback
+                let attempts = 0;
+                const interval = setInterval(() => {
+                    if (tryHook() || ++attempts > 60) {
+                        clearInterval(interval);
+                    }
+                }, 500);
+            }
+        })();
+        `;
+        document.documentElement.appendChild(script);
+        script.remove();
+
+        // Listen for PlaybackManager intercepts
+        window.addEventListener('message', async function(e) {
+            if (e.data?.type === 'launchtube-playback-manager') {
+                const { itemId, startPositionTicks } = e.data;
+                console.log('Launch Tube: PlaybackManager intercept, itemId:', itemId);
+                await playExternal(itemId, startPositionTicks);
+            }
+        });
+    }
+
     // Initialize
     function init() {
         console.log('Launch Tube: Initializing Jellyfin integration');
         hidePlayMenuItems();
+        hookPlaybackManager();
         attachPlayListeners();
         interceptVideoPlayback();
     }

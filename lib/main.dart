@@ -404,6 +404,14 @@ class FileCache {
 }
 
 // External player (mpv) with IPC for position tracking
+class PlaylistItem {
+  final String url;
+  final String? itemId;
+  final Map<String, dynamic>? onComplete;
+
+  PlaylistItem({required this.url, this.itemId, this.onComplete});
+}
+
 class ExternalPlayer {
   static ExternalPlayer? _instance;
   Process? _process;
@@ -414,6 +422,11 @@ class ExternalPlayer {
   double _duration = 0;
   bool _paused = false;
   Map<String, dynamic>? _onComplete;
+
+  // Playlist support
+  List<PlaylistItem> _playlist = [];
+  int _playlistPosition = 0;
+  int _lastReportedPosition = -1;
 
   static ExternalPlayer getInstance() {
     _instance ??= ExternalPlayer();
@@ -495,6 +508,83 @@ class ExternalPlayer {
     _startPositionPolling();
   }
 
+  Future<void> playPlaylist({
+    required List<PlaylistItem> items,
+    double startPosition = 0,
+  }) async {
+    if (items.isEmpty) return;
+
+    // Stop any existing playback
+    await stop();
+
+    _playlist = items;
+    _playlistPosition = 0;
+    _lastReportedPosition = -1;
+    _onComplete = items.first.onComplete;
+    _position = startPosition;
+    _duration = 0;
+    _paused = false;
+
+    // Remove old socket file if exists
+    final socketFile = File(_ipcPath);
+    if (await socketFile.exists()) {
+      await socketFile.delete();
+    }
+
+    // Build mpv arguments
+    final args = <String>[
+      '--fullscreen',
+      '--input-ipc-server=$_ipcPath',
+    ];
+
+    if (startPosition > 0) {
+      args.add('--start=${startPosition.toStringAsFixed(1)}');
+    }
+
+    // Add all URLs
+    for (final item in items) {
+      args.add(item.url);
+    }
+
+    // Launch mpv
+    print('ExternalPlayer: Running mpv playlist with ${items.length} items');
+    _process = await Process.start('mpv', args);
+    print('ExternalPlayer: Started mpv with PID ${_process!.pid}');
+
+    // Log stdout/stderr
+    _process!.stdout.transform(utf8.decoder).listen((data) {
+      print('mpv stdout: $data');
+    });
+    _process!.stderr.transform(utf8.decoder).listen((data) {
+      print('mpv stderr: $data');
+    });
+
+    // Wait for mpv to exit in background
+    _process!.exitCode.then((_) async {
+      print('ExternalPlayer: mpv exited, position=$_position, playlistPos=$_playlistPosition');
+
+      // Get final position before cleanup
+      await _queryPosition();
+
+      // Execute onComplete callback for final item
+      if (_playlistPosition < _playlist.length) {
+        _onComplete = _playlist[_playlistPosition].onComplete;
+        if (_onComplete != null) {
+          await _executeCallback();
+        }
+      }
+
+      _process = null;
+      _playlist = [];
+      _playlistPosition = 0;
+      _ipcSocket?.close();
+      _ipcSocket = null;
+    });
+
+    // Start position polling
+    _startPositionPolling();
+  }
+
   void _startPositionPolling() {
     Future.doWhile(() async {
       if (_process == null) return false;
@@ -521,6 +611,7 @@ class ExternalPlayer {
         jsonEncode({'command': ['get_property', 'time-pos'], 'request_id': 1}),
         jsonEncode({'command': ['get_property', 'duration'], 'request_id': 2}),
         jsonEncode({'command': ['get_property', 'pause'], 'request_id': 3}),
+        jsonEncode({'command': ['get_property', 'playlist-pos'], 'request_id': 4}),
       ].join('\n') + '\n';
 
       _ipcSocket!.write(commands);
@@ -531,10 +622,12 @@ class ExternalPlayer {
       await for (final chunk in _ipcSocket!.timeout(const Duration(milliseconds: 500))) {
         buffer.write(utf8.decode(chunk));
         final content = buffer.toString();
-        if (content.split('\n').where((l) => l.trim().isNotEmpty).length >= 3) {
+        if (content.split('\n').where((l) => l.trim().isNotEmpty).length >= 4) {
           break;
         }
       }
+
+      int? newPlaylistPos;
 
       // Parse responses
       for (final line in buffer.toString().split('\n')) {
@@ -554,11 +647,30 @@ class ExternalPlayer {
               case 3:
                 _paused = value as bool;
                 break;
+              case 4:
+                newPlaylistPos = (value as num).toInt();
+                break;
             }
           }
         } catch (_) {
           // Skip malformed responses
         }
+      }
+
+      // Handle playlist position change - report progress for previous item
+      if (newPlaylistPos != null && newPlaylistPos != _lastReportedPosition && _playlist.isNotEmpty) {
+        if (_lastReportedPosition >= 0 && _lastReportedPosition < _playlist.length) {
+          // Report completion of previous item (at end of video)
+          final prevItem = _playlist[_lastReportedPosition];
+          if (prevItem.onComplete != null) {
+            _onComplete = prevItem.onComplete;
+            _position = _duration; // Report at end
+            await _executeCallback();
+          }
+        }
+        _playlistPosition = newPlaylistPos;
+        _lastReportedPosition = newPlaylistPos;
+        _position = 0; // Reset position for new item
       }
 
       _ipcSocket?.close();
@@ -642,12 +754,17 @@ class ExternalPlayer {
     if (_process == null) {
       return {'playing': false};
     }
-    return {
+    final status = {
       'playing': true,
       'paused': _paused,
       'position': _position,
       'duration': _duration,
     };
+    if (_playlist.isNotEmpty) {
+      status['playlistPosition'] = _playlistPosition;
+      status['playlistCount'] = _playlist.length;
+    }
+    return status;
   }
 }
 
@@ -731,6 +848,7 @@ class LaunchTubeServer {
           '/api/kv/{serviceId}',
           '/api/kv/{serviceId}/{key}',
           '/api/player/play',
+          '/api/player/playlist',
           '/api/player/status',
           '/api/player/stop',
           '/install',
@@ -1040,6 +1158,50 @@ class LaunchTubeServer {
         request.response
           ..headers.contentType = ContentType.json
           ..write('{"status":"playing","position":${startPosition.toStringAsFixed(1)}}')
+          ..close();
+      } catch (e) {
+        request.response
+          ..statusCode = HttpStatus.badRequest
+          ..headers.contentType = ContentType.json
+          ..write('{"error":"Invalid request: $e"}')
+          ..close();
+      }
+    } else if (path == '/api/player/playlist' && request.method == 'POST') {
+      print('Player API: Received playlist request');
+      try {
+        final body = await utf8.decoder.bind(request).join();
+        print('Player API: Body: $body');
+        final data = jsonDecode(body) as Map<String, dynamic>;
+
+        final itemsData = data['items'] as List<dynamic>?;
+        if (itemsData == null || itemsData.isEmpty) {
+          request.response
+            ..statusCode = HttpStatus.badRequest
+            ..headers.contentType = ContentType.json
+            ..write('{"error":"items array is required"}')
+            ..close();
+          return;
+        }
+
+        final items = itemsData.map((item) {
+          final itemMap = item as Map<String, dynamic>;
+          return PlaylistItem(
+            url: itemMap['url'] as String,
+            itemId: itemMap['itemId'] as String?,
+            onComplete: itemMap['onComplete'] as Map<String, dynamic>?,
+          );
+        }).toList();
+
+        final startPosition = (data['startPosition'] as num?)?.toDouble() ?? 0;
+
+        await player.playPlaylist(
+          items: items,
+          startPosition: startPosition,
+        );
+
+        request.response
+          ..headers.contentType = ContentType.json
+          ..write('{"status":"playing","count":${items.length}}')
           ..close();
       } catch (e) {
         request.response

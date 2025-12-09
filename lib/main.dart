@@ -8,7 +8,20 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
-void main() async {
+// Build-time constants injected via --dart-define
+const String appVersion = String.fromEnvironment('APP_VERSION', defaultValue: 'dev');
+const String buildDate = String.fromEnvironment('BUILD_DATE', defaultValue: 'unknown');
+const String gitCommit = String.fromEnvironment('GIT_COMMIT', defaultValue: 'unknown');
+
+void main(List<String> args) async {
+  // Handle --version flag before Flutter initialization
+  if (args.contains('--version') || args.contains('-v')) {
+    print('Launch Tube $appVersion');
+    print('Build: $buildDate');
+    print('Commit: $gitCommit');
+    exit(0);
+  }
+
   WidgetsFlutterBinding.ensureInitialized();
   // Initialize app support dir, then log asset directory at startup
   await _getAppSupportDir();
@@ -866,6 +879,16 @@ class LaunchTubeServer {
         ..headers.contentType = ContentType.json
         ..write('{"status":"ok","app":"launchtube"}')
         ..close();
+    } else if (request.uri.path == '/api/version') {
+      request.response
+        ..headers.contentType = ContentType.json
+        ..write(jsonEncode({
+          'app': 'launchtube',
+          'version': appVersion,
+          'commit': gitCommit,
+          'build': buildDate,
+        }))
+        ..close();
     } else if (request.uri.path == '/launchtube-loader.user.js') {
       // Serve userscript for Tampermonkey installation
       await _serveUserscript(request);
@@ -888,6 +911,7 @@ class LaunchTubeServer {
         'port': _port,
         'endpoints': [
           '/api/ping',
+          '/api/version',
           '/api/status',
           '/api/shutdown',
           '/api/match?url={pageUrl}',
@@ -1583,6 +1607,55 @@ class _LauncherHomeState extends State<LauncherHome> {
     _showConfigDialog(apps[index].copy(), isNew: false, index: index);
   }
 
+  void _showAboutDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        title: const Text('About Launch Tube', style: TextStyle(color: Colors.white)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Launch Tube',
+              style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'A media launcher for streaming services.',
+              style: TextStyle(color: Colors.white70),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Version: $appVersion',
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+            Text(
+              'Build: $buildDate',
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+            Text(
+              'Commit: $gitCommit',
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'By James Vasile',
+              style: TextStyle(color: Colors.white70),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showBrowserSelector() {
     if (_availableBrowsers.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1691,6 +1764,11 @@ class _LauncherHomeState extends State<LauncherHome> {
                           case 'select_browser':
                             _showBrowserSelector();
                             break;
+                          case 'about':
+                            _showAboutDialog();
+                            break;
+                          case 'exit':
+                            exit(0);
                         }
                       },
                       itemBuilder: (context) => [
@@ -1713,6 +1791,27 @@ class _LauncherHomeState extends State<LauncherHome> {
                               Icon(Icons.extension, color: Colors.white70),
                               SizedBox(width: 12),
                               Text('Install Browser Userscript'),
+                            ],
+                          ),
+                        ),
+                        const PopupMenuDivider(),
+                        const PopupMenuItem(
+                          value: 'about',
+                          child: Row(
+                            children: [
+                              Icon(Icons.info_outline, color: Colors.white70),
+                              SizedBox(width: 12),
+                              Text('About'),
+                            ],
+                          ),
+                        ),
+                        const PopupMenuItem(
+                          value: 'exit',
+                          child: Row(
+                            children: [
+                              Icon(Icons.exit_to_app, color: Colors.white70),
+                              SizedBox(width: 12),
+                              Text('Exit'),
                             ],
                           ),
                         ),

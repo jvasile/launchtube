@@ -13,7 +13,7 @@ autologin-user-timeout=0
 ```
 
 ```
-$ sudo apt install caffeine xscreensaver xscreensaver-gl-extra unclutter
+$ sudo apt install caffeine mpv xscreensaver xscreensaver-gl-extra unclutter
 ```
 
 As guest:

@@ -24,7 +24,6 @@ class AppConfig {
   String? imagePath;
   int colorValue;
   bool showName;
-  String? serviceId; // ID for loading service-specific userscript
 
   AppConfig({
     required this.name,
@@ -35,7 +34,6 @@ class AppConfig {
     this.imagePath,
     required this.colorValue,
     this.showName = true,
-    this.serviceId,
   });
 
   Color get color => Color(colorValue);
@@ -49,7 +47,6 @@ class AppConfig {
         'imagePath': imagePath,
         'colorValue': colorValue,
         'showName': showName,
-        'serviceId': serviceId,
       };
 
   factory AppConfig.fromJson(Map<String, dynamic> json) => AppConfig(
@@ -61,7 +58,6 @@ class AppConfig {
         imagePath: json['imagePath'],
         colorValue: json['colorValue'],
         showName: json['showName'] ?? true,
-        serviceId: json['serviceId'],
       );
 
   AppConfig copy() => AppConfig(
@@ -73,7 +69,6 @@ class AppConfig {
         imagePath: imagePath,
         colorValue: colorValue,
         showName: showName,
-        serviceId: serviceId,
       );
 }
 
@@ -81,7 +76,6 @@ final List<AppConfig> defaultApps = [];
 
 // Service library for pre-configured streaming services
 class ServiceTemplate {
-  final String id; // Service ID for userscript matching
   final String name;
   final String url;
   final int colorValue;
@@ -89,7 +83,6 @@ class ServiceTemplate {
   final bool isBundled; // true = bundled asset, false = user file
 
   const ServiceTemplate({
-    required this.id,
     required this.name,
     required this.url,
     required this.colorValue,
@@ -97,9 +90,8 @@ class ServiceTemplate {
     this.isBundled = true,
   });
 
-  factory ServiceTemplate.fromJson(String id, Map<String, dynamic> json, String? logoPath, bool isBundled) {
+  factory ServiceTemplate.fromJson(Map<String, dynamic> json, String? logoPath, bool isBundled) {
     return ServiceTemplate(
-      id: id,
       name: json['name'] as String,
       url: json['url'] as String,
       colorValue: _parseColor(json['color'] as String),
@@ -121,7 +113,6 @@ class ServiceTemplate {
     colorValue: colorValue,
     imagePath: logoPath,
     showName: logoPath == null,
-    serviceId: id,
   );
 }
 
@@ -174,7 +165,7 @@ class ServiceLibraryLoader {
             }
           }
 
-          services.add(ServiceTemplate.fromJson(serviceId, json, logoPath, true));
+          services.add(ServiceTemplate.fromJson(json, logoPath, true));
         } catch (e) {
           // Skip invalid service files
           debugPrint('Failed to load bundled service $serviceId: $e');
@@ -208,10 +199,6 @@ class ServiceLibraryLoader {
           final jsonStr = await File(file.path).readAsString();
           final json = jsonDecode(jsonStr) as Map<String, dynamic>;
 
-          // Extract service ID from filename
-          final fileName = file.path.split('/').last;
-          final serviceId = fileName.replaceAll('.json', '');
-
           // Check for logo file with same base name
           final baseName = file.path.replaceAll('.json', '');
           String? logoPath;
@@ -223,7 +210,7 @@ class ServiceLibraryLoader {
             }
           }
 
-          services.add(ServiceTemplate.fromJson(serviceId, json, logoPath, false));
+          services.add(ServiceTemplate.fromJson(json, logoPath, false));
         } catch (e) {
           debugPrint('Failed to load user service ${file.path}: $e');
         }
@@ -372,12 +359,21 @@ class ExternalPlayer {
     args.add(url);
 
     // Launch mpv
-    _process = await Process.start('mpv', args, mode: ProcessStartMode.detached);
-    debugPrint('ExternalPlayer: Started mpv with PID ${_process!.pid}');
+    print('ExternalPlayer: Running mpv ${args.join(' ')}');
+    _process = await Process.start('mpv', args);
+    print('ExternalPlayer: Started mpv with PID ${_process!.pid}');
+
+    // Log stdout/stderr
+    _process!.stdout.transform(utf8.decoder).listen((data) {
+      print('mpv stdout: $data');
+    });
+    _process!.stderr.transform(utf8.decoder).listen((data) {
+      print('mpv stderr: $data');
+    });
 
     // Wait for mpv to exit in background
     _process!.exitCode.then((_) async {
-      debugPrint('ExternalPlayer: mpv exited, position=$_position');
+      print('ExternalPlayer: mpv exited, position=$_position');
 
       // Get final position before cleanup
       await _queryPosition();
@@ -696,24 +692,19 @@ class LaunchTubeServer {
       return;
     }
 
-    // Find matching app by comparing hostnames
-    String? matchedServiceId;
+    // Find matching app by checking if app URL is a prefix of page URL
+    String? matchedServiceName;
     for (final app in apps) {
-      if (app.url == null || app.serviceId == null) continue;
+      if (app.url == null) continue;
 
-      try {
-        final appUri = Uri.parse(app.url!);
-        // Match if hostnames are equal (ignoring port for flexibility)
-        if (appUri.host.toLowerCase() == pageUri.host.toLowerCase()) {
-          matchedServiceId = app.serviceId;
-          break;
-        }
-      } catch (_) {
-        // Skip invalid URLs
+      // Check if app URL is a prefix of the page URL
+      if (pageUrl.toLowerCase().startsWith(app.url!.toLowerCase())) {
+        matchedServiceName = app.name;
+        break;
       }
     }
 
-    if (matchedServiceId == null) {
+    if (matchedServiceName == null) {
       // No match - return 204 No Content (not an error, just no script)
       request.response
         ..statusCode = HttpStatus.noContent
@@ -721,8 +712,9 @@ class LaunchTubeServer {
       return;
     }
 
-    // Serve the matched service script
-    await _serveServiceScript(request, matchedServiceId);
+    // Derive service ID from name: "Jellyfin" -> "jellyfin"
+    final serviceId = matchedServiceName.toLowerCase().replaceAll(' ', '-');
+    await _serveServiceScript(request, serviceId);
   }
 
   Future<void> _serveUserscript(HttpRequest request) async {
@@ -899,8 +891,10 @@ class LaunchTubeServer {
     final player = ExternalPlayer.getInstance();
 
     if (path == '/api/player/play' && request.method == 'POST') {
+      print('Player API: Received play request');
       try {
         final body = await utf8.decoder.bind(request).join();
+        print('Player API: Body: $body');
         final data = jsonDecode(body) as Map<String, dynamic>;
 
         final url = data['url'] as String?;

@@ -95,23 +95,25 @@ class BrowserInfo {
   final String name;
   final String executable;
   final String kioskFlag;
+  final String newWindowFlag;
 
   const BrowserInfo({
     required this.name,
     required this.executable,
     required this.kioskFlag,
+    required this.newWindowFlag,
   });
 
   static const List<BrowserInfo> _knownBrowsers = [
-    BrowserInfo(name: 'Firefox', executable: 'firefox', kioskFlag: '--kiosk'),
-    BrowserInfo(name: 'Firefox', executable: 'firefox.exe', kioskFlag: '--kiosk'),
-    BrowserInfo(name: 'Chrome', executable: 'google-chrome', kioskFlag: '--kiosk'),
-    BrowserInfo(name: 'Chrome', executable: 'google-chrome-stable', kioskFlag: '--kiosk'),
-    BrowserInfo(name: 'Chrome', executable: 'chrome', kioskFlag: '--kiosk'),
-    BrowserInfo(name: 'Chrome', executable: 'chrome.exe', kioskFlag: '--kiosk'),
-    BrowserInfo(name: 'Chromium', executable: 'chromium', kioskFlag: '--kiosk'),
-    BrowserInfo(name: 'Chromium', executable: 'chromium-browser', kioskFlag: '--kiosk'),
-    BrowserInfo(name: 'Chromium', executable: 'chromium.exe', kioskFlag: '--kiosk'),
+    BrowserInfo(name: 'Firefox', executable: 'firefox', kioskFlag: '--kiosk', newWindowFlag: '--new-window'),
+    BrowserInfo(name: 'Firefox', executable: 'firefox.exe', kioskFlag: '--kiosk', newWindowFlag: '--new-window'),
+    BrowserInfo(name: 'Chrome', executable: 'google-chrome', kioskFlag: '--kiosk', newWindowFlag: '--new-window'),
+    BrowserInfo(name: 'Chrome', executable: 'google-chrome-stable', kioskFlag: '--kiosk', newWindowFlag: '--new-window'),
+    BrowserInfo(name: 'Chrome', executable: 'chrome', kioskFlag: '--kiosk', newWindowFlag: '--new-window'),
+    BrowserInfo(name: 'Chrome', executable: 'chrome.exe', kioskFlag: '--kiosk', newWindowFlag: '--new-window'),
+    BrowserInfo(name: 'Chromium', executable: 'chromium', kioskFlag: '--kiosk', newWindowFlag: '--new-window'),
+    BrowserInfo(name: 'Chromium', executable: 'chromium-browser', kioskFlag: '--kiosk', newWindowFlag: '--new-window'),
+    BrowserInfo(name: 'Chromium', executable: 'chromium.exe', kioskFlag: '--kiosk', newWindowFlag: '--new-window'),
   ];
 
   static Future<List<BrowserInfo>> detectBrowsers() async {
@@ -857,11 +859,16 @@ class LaunchTubeServer {
   HttpServer? _server;
   int? _port;
   List<AppConfig> Function()? _getApps;
+  Future<void> Function()? _closeBrowser;
 
   int? get port => _port;
 
   void setAppsProvider(List<AppConfig> Function() getApps) {
     _getApps = getApps;
+  }
+
+  void setCloseBrowserCallback(Future<void> Function() closeBrowser) {
+    _closeBrowser = closeBrowser;
   }
 
   Future<void> start() async {
@@ -920,6 +927,11 @@ class LaunchTubeServer {
       // Serve install page that auto-closes
       await _serveInstallPage(request);
     } else if (request.uri.path == '/api/1/shutdown') {
+      // Stop player and close browser before shutting down
+      await ExternalPlayer.getInstance().stop();
+      if (_closeBrowser != null) {
+        await _closeBrowser!();
+      }
       // Trigger application shutdown
       request.response
         ..headers.contentType = ContentType.json
@@ -946,6 +958,7 @@ class LaunchTubeServer {
           '/api/1/player/playlist',
           '/api/1/player/status',
           '/api/1/player/stop',
+          '/api/1/browser/close',
           '/install',
           '/launchtube-loader.user.js',
         ],
@@ -1403,6 +1416,20 @@ class LaunchTubeServer {
         ..headers.contentType = ContentType.json
         ..write('{"status":"ok"}')
         ..close();
+    } else if (path == '/api/1/browser/close' && request.method == 'POST') {
+      if (_closeBrowser != null) {
+        await _closeBrowser!();
+        request.response
+          ..headers.contentType = ContentType.json
+          ..write('{"status":"ok"}')
+          ..close();
+      } else {
+        request.response
+          ..statusCode = HttpStatus.serviceUnavailable
+          ..headers.contentType = ContentType.json
+          ..write('{"status":"error","message":"No browser to close"}')
+          ..close();
+      }
     } else {
       request.response
         ..statusCode = HttpStatus.notFound
@@ -1476,6 +1503,9 @@ class _LauncherHomeState extends State<LauncherHome> {
   List<String> _availableMpv = [];
   String? _selectedMpv; // executable path or name
 
+  // Track launched browser process for closing
+  Process? _browserProcess;
+
   @override
   void initState() {
     super.initState();
@@ -1484,6 +1514,7 @@ class _LauncherHomeState extends State<LauncherHome> {
     _detectBrowsers();
     _detectMpv();
     _server.setAppsProvider(() => apps);
+    _server.setCloseBrowserCallback(_closeBrowser);
     _server.start();
   }
 
@@ -1619,6 +1650,10 @@ class _LauncherHomeState extends State<LauncherHome> {
   }
 
   void _launchApp(AppConfig app) async {
+    // Stop any running player and close any existing browser first
+    await ExternalPlayer.getInstance().stop();
+    await _closeBrowser();
+
     try {
       if (app.type == AppType.website) {
         if (_selectedBrowser == null) {
@@ -1628,12 +1663,19 @@ class _LauncherHomeState extends State<LauncherHome> {
           (b) => b.executable == _selectedBrowser,
         );
         final args = <String>[];
+        // Always use new window so we get a dedicated window we can close
+        args.add(browser.newWindowFlag);
         if (app.kioskMode) {
           args.add(browser.kioskFlag);
         }
         args.add(app.url!);
 
-        await Process.start(browser.executable, args, mode: ProcessStartMode.detached);
+        // Track browser process so we can close it later
+        _browserProcess = await Process.start(browser.executable, args);
+        // Don't wait for it to exit, just let it run
+        _browserProcess!.exitCode.then((_) {
+          _browserProcess = null;
+        });
       } else {
         final parts = app.commandLine!.split(' ').where((s) => s.isNotEmpty).toList();
         final command = parts.first;
@@ -1649,6 +1691,13 @@ class _LauncherHomeState extends State<LauncherHome> {
           ),
         );
       }
+    }
+  }
+
+  Future<void> _closeBrowser() async {
+    if (_browserProcess != null) {
+      _browserProcess!.kill();
+      _browserProcess = null;
     }
   }
 
@@ -1885,7 +1934,7 @@ class _LauncherHomeState extends State<LauncherHome> {
               Stack(
                 alignment: Alignment.center,
                 children: [
-                  Center(child: Image.asset('assets/images/launch-tube-logo/logo_wide.png', height: 100)),
+                  Center(child: Image.file(File('${getAssetDirectory()}/images/launch-tube-logo/logo_wide.png'), height: 100)),
                   Positioned(
                     left: 20,
                     child: PopupMenuButton<String>(

@@ -23,7 +23,10 @@ As guest:
 ```
 $ gsettings set org.gnome.desktop.screensaver lock-enabled false
 
-# 4. Auto-start on login - create ~/.config/autostart/xscreensaver.desktop:
+# Add to ~/.config/mpv/mpv.conf
+stop-screensaver=always
+
+# Auto-start on login - create ~/.config/autostart/xscreensaver.desktop:
   [Desktop Entry]
   Type=Application
   Name=XScreenSaver

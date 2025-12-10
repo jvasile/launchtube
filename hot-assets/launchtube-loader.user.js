@@ -48,7 +48,7 @@
         try {
             const response = await gmFetch({
                 method: 'GET',
-                url: `http://localhost:${port}/api/ping`,
+                url: `http://localhost:${port}/api/1/ping`,
                 timeout: 1000,
             });
             if (response.status === 200) {
@@ -80,7 +80,7 @@
         try {
             const response = await gmFetch({
                 method: 'GET',
-                url: `http://localhost:${port}/api/match?url=${encodeURIComponent(location.href)}`,
+                url: `http://localhost:${port}/api/1/match?url=${encodeURIComponent(location.href)}`,
             });
             if (response.status === 200 && response.responseText) {
                 const script = document.createElement('script');

@@ -4,10 +4,69 @@
 (function() {
     'use strict';
 
-    console.log('Launch Tube: Jellyfin script loaded');
+    // Prevent double-loading
+    if (window.__LAUNCHTUBE_JELLYFIN_LOADED__) return;
 
     const LAUNCH_TUBE_PORT = window.LAUNCH_TUBE_PORT || 8765;
     const LAUNCH_TUBE_URL = `http://localhost:${LAUNCH_TUBE_PORT}`;
+
+    // Version detection bootstrap
+    async function detectJellyfinVersion() {
+        try {
+            // /System/Info/Public doesn't require authentication
+            const resp = await fetch(`${location.origin}/System/Info/Public`);
+            if (resp.ok) {
+                const info = await resp.json();
+                return info.Version; // e.g., "10.9.3"
+            }
+        } catch (e) {
+            console.log('Launch Tube: Could not detect Jellyfin version:', e);
+        }
+        return null;
+    }
+
+    async function tryLoadVersionedScript(version) {
+        const url = `${LAUNCH_TUBE_URL}/api/1/match?url=${encodeURIComponent(location.href)}&version=${encodeURIComponent(version)}`;
+        try {
+            const resp = await fetch(url);
+            if (resp.ok && resp.status !== 204) {
+                const script = await resp.text();
+                // Check if we got a different (versioned) script
+                if (script && script.includes('__LAUNCHTUBE_JELLYFIN_LOADED__')) {
+                    console.log('Launch Tube: Loading versioned script for Jellyfin', version);
+                    window.__LAUNCHTUBE_JELLYFIN_LOADED__ = true;
+                    const el = document.createElement('script');
+                    el.textContent = script;
+                    document.head.appendChild(el);
+                    return true;
+                }
+            }
+        } catch (e) {
+            console.log('Launch Tube: Versioned script request failed:', e);
+        }
+        return false;
+    }
+
+    async function bootstrap() {
+        const version = await detectJellyfinVersion();
+        console.log('Launch Tube: Detected Jellyfin version:', version);
+
+        if (version) {
+            const loaded = await tryLoadVersionedScript(version);
+            if (loaded) return; // Versioned script will handle everything
+        }
+
+        // Fall through to base implementation
+        window.__LAUNCHTUBE_JELLYFIN_LOADED__ = true;
+        initJellyfin();
+    }
+
+    // Start bootstrap
+    bootstrap();
+
+    // Base implementation
+    function initJellyfin() {
+        console.log('Launch Tube: Jellyfin script loaded');
 
     // Modal state
     let modalElement = null;
@@ -115,7 +174,7 @@
             statusElement = null;
         }
         if (stopPlayer) {
-            fetch(`${LAUNCH_TUBE_URL}/api/player/stop`, { method: 'POST' }).catch(() => {});
+            fetch(`${LAUNCH_TUBE_URL}/api/1/player/stop`, { method: 'POST' }).catch(() => {});
         }
     }
 
@@ -132,7 +191,7 @@
         setTimeout(() => {
             pollInterval = setInterval(async () => {
                 try {
-                    const response = await fetch(`${LAUNCH_TUBE_URL}/api/player/status`);
+                    const response = await fetch(`${LAUNCH_TUBE_URL}/api/1/player/status`);
                     const status = await response.json();
                     console.log('Launch Tube: Poll status:', status);
 
@@ -240,7 +299,7 @@
 
             console.log('Launch Tube: Playing playlist:', playlistItems.length, 'items');
 
-            const response = await fetch(`${LAUNCH_TUBE_URL}/api/player/playlist`, {
+            const response = await fetch(`${LAUNCH_TUBE_URL}/api/1/player/playlist`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ items: playlistItems, startPosition }),
@@ -286,7 +345,7 @@
 
                 console.log('Launch Tube: Playing single item:', { streamUrl, title, startPosition });
 
-                const response = await fetch(`${LAUNCH_TUBE_URL}/api/player/play`, {
+                const response = await fetch(`${LAUNCH_TUBE_URL}/api/1/player/play`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ url: streamUrl, title, startPosition, onComplete }),
@@ -602,4 +661,5 @@
     } else {
         setTimeout(init, 500);
     }
+    } // end initJellyfin()
 })();

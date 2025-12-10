@@ -894,16 +894,16 @@ class LaunchTubeServer {
       return;
     }
 
-    if (request.uri.path.startsWith('/api/service/')) {
+    if (request.uri.path.startsWith('/api/1/service/')) {
       final serviceId = request.uri.path.split('/').last;
       await _serveServiceScript(request, serviceId);
-    } else if (request.uri.path == '/api/ping') {
+    } else if (request.uri.path == '/api/1/ping') {
       // Health check endpoint for port discovery
       request.response
         ..headers.contentType = ContentType.json
         ..write('{"status":"ok","app":"launchtube"}')
         ..close();
-    } else if (request.uri.path == '/api/version') {
+    } else if (request.uri.path == '/api/1/version') {
       request.response
         ..headers.contentType = ContentType.json
         ..write(jsonEncode({
@@ -919,7 +919,7 @@ class LaunchTubeServer {
     } else if (request.uri.path == '/install') {
       // Serve install page that auto-closes
       await _serveInstallPage(request);
-    } else if (request.uri.path == '/api/shutdown') {
+    } else if (request.uri.path == '/api/1/shutdown') {
       // Trigger application shutdown
       request.response
         ..headers.contentType = ContentType.json
@@ -927,25 +927,25 @@ class LaunchTubeServer {
         ..close();
       // Exit the application after responding
       Future.delayed(const Duration(milliseconds: 100), () => exit(0));
-    } else if (request.uri.path == '/api/status') {
+    } else if (request.uri.path == '/api/1/status') {
       // Status endpoint with server info
       final status = jsonEncode({
         'status': 'ok',
         'app': 'launchtube',
         'port': _port,
         'endpoints': [
-          '/api/ping',
-          '/api/version',
-          '/api/status',
-          '/api/shutdown',
-          '/api/match?url={pageUrl}',
-          '/api/service/{serviceId}',
-          '/api/kv/{serviceId}',
-          '/api/kv/{serviceId}/{key}',
-          '/api/player/play',
-          '/api/player/playlist',
-          '/api/player/status',
-          '/api/player/stop',
+          '/api/1/ping',
+          '/api/1/version',
+          '/api/1/status',
+          '/api/1/shutdown',
+          '/api/1/match?url={pageUrl}&version={serviceVersion}',
+          '/api/1/service/{serviceId}',
+          '/api/1/kv/{serviceId}',
+          '/api/1/kv/{serviceId}/{key}',
+          '/api/1/player/play',
+          '/api/1/player/playlist',
+          '/api/1/player/status',
+          '/api/1/player/stop',
           '/install',
           '/launchtube-loader.user.js',
         ],
@@ -954,11 +954,11 @@ class LaunchTubeServer {
         ..headers.contentType = ContentType.json
         ..write(status)
         ..close();
-    } else if (request.uri.path == '/api/match') {
+    } else if (request.uri.path == '/api/1/match') {
       await _handleMatchRequest(request);
-    } else if (request.uri.path.startsWith('/api/player/')) {
+    } else if (request.uri.path.startsWith('/api/1/player/')) {
       await _handlePlayerRequest(request);
-    } else if (request.uri.path.startsWith('/api/kv/')) {
+    } else if (request.uri.path.startsWith('/api/1/kv/')) {
       await _handleKvRequest(request);
     } else {
       request.response
@@ -968,10 +968,25 @@ class LaunchTubeServer {
     }
   }
 
-  Future<void> _serveServiceScript(HttpRequest request, String serviceId) async {
+  Future<void> _serveServiceScript(HttpRequest request, String serviceId, {String? version}) async {
     final dataDir = getAssetDirectory();
-    final scriptPath = '$dataDir/services/$serviceId.js';
     final cache = FileCache.getInstance();
+
+    // Try to find versioned script if version specified
+    String scriptPath = '$dataDir/services/$serviceId.js';
+    if (version != null) {
+      final versionedPath = await _findBestVersionedScript(dataDir, serviceId, version);
+      if (versionedPath != null) {
+        scriptPath = versionedPath;
+      } else {
+        // Version requested but no versioned script available - return 204
+        // to tell client to use its base implementation
+        request.response
+          ..statusCode = HttpStatus.noContent
+          ..close();
+        return;
+      }
+    }
 
     final script = await cache.getString(scriptPath);
     if (script == null) {
@@ -982,13 +997,83 @@ class LaunchTubeServer {
       return;
     }
 
+    // Prepend LaunchTube version so service scripts can check compatibility
+    final versionedScript = 'window.LAUNCH_TUBE_VERSION = "$appVersion";\n$script';
+
     final mtime = cache.getMtime(scriptPath);
     request.response
       ..headers.contentType = ContentType('application', 'javascript', charset: 'utf-8')
       ..headers.add('Cache-Control', 'max-age=31536000')
       ..headers.add('ETag', '"${mtime?.millisecondsSinceEpoch ?? 0}"')
-      ..write(script)
+      ..write(versionedScript)
       ..close();
+  }
+
+  /// Find the best versioned script file for a service.
+  /// Returns the path to the best matching versioned script, or null if none found.
+  /// Picks the highest version <= requested version.
+  /// If requested version is older than all available, returns oldest available.
+  Future<String?> _findBestVersionedScript(String dataDir, String serviceId, String requestedVersion) async {
+    final servicesDir = Directory('$dataDir/services');
+    if (!await servicesDir.exists()) return null;
+
+    // Pattern: {serviceId}-{version}.js where version is like 10.8 or 10.8.1
+    final pattern = RegExp('^${RegExp.escape(serviceId)}-(\\d+(?:\\.\\d+)*)\\.js\$');
+    final availableVersions = <String, String>{}; // version string -> filepath
+
+    await for (final entity in servicesDir.list()) {
+      if (entity is! File) continue;
+      final filename = entity.uri.pathSegments.last;
+      final match = pattern.firstMatch(filename);
+      if (match != null) {
+        availableVersions[match.group(1)!] = entity.path;
+      }
+    }
+
+    if (availableVersions.isEmpty) return null;
+
+    final requestedParsed = _parseVersion(requestedVersion);
+    String? bestMatch;
+    List<int>? bestVersion;
+    String? oldestMatch;
+    List<int>? oldestVersion;
+
+    for (final entry in availableVersions.entries) {
+      final v = _parseVersion(entry.key);
+
+      // Track oldest version as fallback
+      if (oldestVersion == null || _compareVersions(v, oldestVersion) < 0) {
+        oldestVersion = v;
+        oldestMatch = entry.value;
+      }
+
+      // Find highest version <= requested
+      if (_compareVersions(v, requestedParsed) <= 0) {
+        if (bestVersion == null || _compareVersions(v, bestVersion) > 0) {
+          bestVersion = v;
+          bestMatch = entry.value;
+        }
+      }
+    }
+
+    // If no version <= requested, fall back to oldest available
+    return bestMatch ?? oldestMatch;
+  }
+
+  /// Parse a version string like "10.8.1" into a list of integers [10, 8, 1]
+  List<int> _parseVersion(String version) {
+    return version.split('.').map((s) => int.tryParse(s) ?? 0).toList();
+  }
+
+  /// Compare two version lists. Returns negative if a < b, positive if a > b, 0 if equal.
+  int _compareVersions(List<int> a, List<int> b) {
+    final maxLen = a.length > b.length ? a.length : b.length;
+    for (var i = 0; i < maxLen; i++) {
+      final av = i < a.length ? a[i] : 0;
+      final bv = i < b.length ? b[i] : 0;
+      if (av != bv) return av - bv;
+    }
+    return 0;
   }
 
   Future<void> _handleMatchRequest(HttpRequest request) async {
@@ -1038,7 +1123,8 @@ class LaunchTubeServer {
 
     // Derive service ID from name: "Jellyfin" -> "jellyfin"
     final serviceId = matchedServiceName.toLowerCase().replaceAll(' ', '-');
-    await _serveServiceScript(request, serviceId);
+    final serviceVersion = request.uri.queryParameters['version'];
+    await _serveServiceScript(request, serviceId, version: serviceVersion);
   }
 
   Future<void> _serveUserscript(HttpRequest request) async {
@@ -1125,11 +1211,11 @@ class LaunchTubeServer {
   }
 
   Future<void> _handleKvRequest(HttpRequest request) async {
-    // Parse path: /api/kv/{serviceId} or /api/kv/{serviceId}/{key}
+    // Parse path: /api/1/kv/{serviceId} or /api/1/kv/{serviceId}/{key}
     final pathParts = request.uri.path.split('/').where((p) => p.isNotEmpty).toList();
-    // pathParts: ['api', 'kv', serviceId, ?key]
+    // pathParts: ['api', '1', 'kv', serviceId, ?key]
 
-    if (pathParts.length < 3) {
+    if (pathParts.length < 4) {
       request.response
         ..statusCode = HttpStatus.badRequest
         ..headers.contentType = ContentType.json
@@ -1138,8 +1224,8 @@ class LaunchTubeServer {
       return;
     }
 
-    final serviceId = pathParts[2];
-    final key = pathParts.length > 3 ? pathParts[3] : null;
+    final serviceId = pathParts[3];
+    final key = pathParts.length > 4 ? pathParts[4] : null;
     final store = await ServiceDataStore.getInstance();
 
     switch (request.method) {
@@ -1222,7 +1308,7 @@ class LaunchTubeServer {
     final path = request.uri.path;
     final player = ExternalPlayer.getInstance();
 
-    if (path == '/api/player/play' && request.method == 'POST') {
+    if (path == '/api/1/player/play' && request.method == 'POST') {
       print('Player API: Received play request');
       try {
         final body = await utf8.decoder.bind(request).join();
@@ -1261,7 +1347,7 @@ class LaunchTubeServer {
           ..write('{"error":"Invalid request: $e"}')
           ..close();
       }
-    } else if (path == '/api/player/playlist' && request.method == 'POST') {
+    } else if (path == '/api/1/player/playlist' && request.method == 'POST') {
       print('Player API: Received playlist request');
       try {
         final body = await utf8.decoder.bind(request).join();
@@ -1305,13 +1391,13 @@ class LaunchTubeServer {
           ..write('{"error":"Invalid request: $e"}')
           ..close();
       }
-    } else if (path == '/api/player/status' && request.method == 'GET') {
+    } else if (path == '/api/1/player/status' && request.method == 'GET') {
       final status = player.getStatus();
       request.response
         ..headers.contentType = ContentType.json
         ..write(jsonEncode(status))
         ..close();
-    } else if (path == '/api/player/stop' && request.method == 'POST') {
+    } else if (path == '/api/1/player/stop' && request.method == 'POST') {
       await player.stop();
       request.response
         ..headers.contentType = ContentType.json

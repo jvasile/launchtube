@@ -125,16 +125,33 @@ class BrowserInfo {
   }
 
   static Future<bool> _isExecutableAvailable(String executable) async {
-    try {
-      final result = await Process.run(
-        Platform.isWindows ? 'where' : 'which',
-        [executable],
-      );
-      return result.exitCode == 0;
-    } catch (_) {
-      return false;
+    return isExecutableAvailable(executable);
+  }
+}
+
+// Shared utility to check if an executable is on the PATH
+Future<bool> isExecutableAvailable(String executable) async {
+  try {
+    final result = await Process.run(
+      Platform.isWindows ? 'where' : 'which',
+      [executable],
+    );
+    return result.exitCode == 0;
+  } catch (_) {
+    return false;
+  }
+}
+
+// Detect available mpv executables
+Future<List<String>> detectMpvExecutables() async {
+  final candidates = ['mpv', 'mpv.exe'];
+  final found = <String>[];
+  for (final exe in candidates) {
+    if (await isExecutableAvailable(exe)) {
+      found.add(exe);
     }
   }
+  return found;
 }
 
 // Service library for pre-configured streaming services
@@ -477,6 +494,7 @@ class ExternalPlayer {
   Process? _process;
   Socket? _ipcSocket;
   String _ipcPath = '/tmp/launchtube-mpv.sock';
+  String _mpvPath = 'mpv'; // configurable mpv executable
 
   double _position = 0;
   double _duration = 0;
@@ -491,6 +509,10 @@ class ExternalPlayer {
   static ExternalPlayer getInstance() {
     _instance ??= ExternalPlayer();
     return _instance!;
+  }
+
+  void setMpvPath(String path) {
+    _mpvPath = path;
   }
 
   bool get isPlaying => _process != null;
@@ -535,9 +557,10 @@ class ExternalPlayer {
     args.add(url);
 
     // Launch mpv
-    print('ExternalPlayer: Running mpv ${args.join(' ')}');
-    _process = await Process.start('mpv', args);
-    print('ExternalPlayer: Started mpv with PID ${_process!.pid}');
+    final cmdLine = [_mpvPath, ...args].map((a) => a.contains(' ') ? '"$a"' : a).join(' ');
+    print('ExternalPlayer: $cmdLine');
+    _process = await Process.start(_mpvPath, args);
+    print('ExternalPlayer: Started with PID ${_process!.pid}');
 
     // Log stdout/stderr
     _process!.stdout.transform(utf8.decoder).listen((data) {
@@ -607,9 +630,10 @@ class ExternalPlayer {
     }
 
     // Launch mpv
-    print('ExternalPlayer: Running mpv playlist with ${items.length} items');
-    _process = await Process.start('mpv', args);
-    print('ExternalPlayer: Started mpv with PID ${_process!.pid}');
+    final cmdLine = [_mpvPath, ...args].map((a) => a.contains(' ') ? '"$a"' : a).join(' ');
+    print('ExternalPlayer: $cmdLine');
+    _process = await Process.start(_mpvPath, args);
+    print('ExternalPlayer: Started with PID ${_process!.pid}');
 
     // Log stdout/stderr
     _process!.stdout.transform(utf8.decoder).listen((data) {
@@ -1362,12 +1386,17 @@ class _LauncherHomeState extends State<LauncherHome> {
   List<BrowserInfo> _availableBrowsers = [];
   String? _selectedBrowser; // executable name
 
+  // Mpv selection
+  List<String> _availableMpv = [];
+  String? _selectedMpv; // executable path or name
+
   @override
   void initState() {
     super.initState();
     _enterFullscreen();
     _loadApps();
     _detectBrowsers();
+    _detectMpv();
     _server.setAppsProvider(() => apps);
     _server.start();
   }
@@ -1408,6 +1437,50 @@ class _LauncherHomeState extends State<LauncherHome> {
       final path = await _browserConfigPath;
       await File(path).writeAsString(_selectedBrowser!);
     } catch (_) {}
+  }
+
+  Future<void> _detectMpv() async {
+    final mpvList = await detectMpvExecutables();
+    final savedMpv = await _loadSelectedMpv();
+    setState(() {
+      _availableMpv = mpvList;
+      // Use saved mpv if set, otherwise first detected
+      if (savedMpv != null && savedMpv.isNotEmpty) {
+        _selectedMpv = savedMpv;
+      } else if (mpvList.isNotEmpty) {
+        _selectedMpv = mpvList.first;
+      }
+    });
+    // Update the ExternalPlayer with the selected mpv
+    if (_selectedMpv != null) {
+      ExternalPlayer.getInstance().setMpvPath(_selectedMpv!);
+    }
+  }
+
+  Future<String> get _mpvConfigPath async {
+    final directory = await getApplicationSupportDirectory();
+    return '${directory.path}/mpv.txt';
+  }
+
+  Future<String?> _loadSelectedMpv() async {
+    try {
+      final path = await _mpvConfigPath;
+      final file = File(path);
+      if (await file.exists()) {
+        return (await file.readAsString()).trim();
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  Future<void> _saveSelectedMpv() async {
+    if (_selectedMpv == null) return;
+    try {
+      final path = await _mpvConfigPath;
+      await File(path).writeAsString(_selectedMpv!);
+    } catch (_) {}
+    // Update the ExternalPlayer with the new mpv path
+    ExternalPlayer.getInstance().setMpvPath(_selectedMpv!);
   }
 
   @override
@@ -1656,49 +1729,26 @@ class _LauncherHomeState extends State<LauncherHome> {
     );
   }
 
-  void _showBrowserSelector() {
-    if (_availableBrowsers.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No browsers found'),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
-    }
-
+  void _showSettingsDialog() {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1A1A2E),
-        title: const Text('Select Browser', style: TextStyle(color: Colors.white)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: _availableBrowsers.map((browser) {
-            return RadioListTile<String>(
-              title: Text(
-                '${browser.name} (${browser.executable})',
-                style: const TextStyle(color: Colors.white),
-              ),
-              value: browser.executable,
-              groupValue: _selectedBrowser,
-              activeColor: Colors.blue,
-              onChanged: (value) {
-                setState(() {
-                  _selectedBrowser = value;
-                });
-                _saveSelectedBrowser();
-                Navigator.of(context).pop();
-              },
-            );
-          }).toList(),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
-        ],
+      builder: (context) => SettingsDialog(
+        availableBrowsers: _availableBrowsers,
+        selectedBrowser: _selectedBrowser,
+        availableMpv: _availableMpv,
+        selectedMpv: _selectedMpv,
+        onBrowserChanged: (value) {
+          setState(() {
+            _selectedBrowser = value;
+          });
+          _saveSelectedBrowser();
+        },
+        onMpvChanged: (value) {
+          setState(() {
+            _selectedMpv = value;
+          });
+          _saveSelectedMpv();
+        },
       ),
     );
   }
@@ -1758,11 +1808,11 @@ class _LauncherHomeState extends State<LauncherHome> {
                       color: const Color(0xFF2A2A4E),
                       onSelected: (value) {
                         switch (value) {
+                          case 'settings':
+                            _showSettingsDialog();
+                            break;
                           case 'install_userscript':
                             _server.openUserscriptInstall();
-                            break;
-                          case 'select_browser':
-                            _showBrowserSelector();
                             break;
                           case 'about':
                             _showAboutDialog();
@@ -1772,15 +1822,13 @@ class _LauncherHomeState extends State<LauncherHome> {
                         }
                       },
                       itemBuilder: (context) => [
-                        PopupMenuItem(
-                          value: 'select_browser',
+                        const PopupMenuItem(
+                          value: 'settings',
                           child: Row(
                             children: [
-                              const Icon(Icons.web, color: Colors.white70),
-                              const SizedBox(width: 12),
-                              Text(_selectedBrowser != null
-                                  ? 'Browser: ${_availableBrowsers.firstWhere((b) => b.executable == _selectedBrowser).name}'
-                                  : 'Select Browser'),
+                              Icon(Icons.settings, color: Colors.white70),
+                              SizedBox(width: 12),
+                              Text('Settings'),
                             ],
                           ),
                         ),
@@ -2160,6 +2208,181 @@ class AddTile extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class SettingsDialog extends StatefulWidget {
+  final List<BrowserInfo> availableBrowsers;
+  final String? selectedBrowser;
+  final List<String> availableMpv;
+  final String? selectedMpv;
+  final Function(String?) onBrowserChanged;
+  final Function(String?) onMpvChanged;
+
+  const SettingsDialog({
+    super.key,
+    required this.availableBrowsers,
+    required this.selectedBrowser,
+    required this.availableMpv,
+    required this.selectedMpv,
+    required this.onBrowserChanged,
+    required this.onMpvChanged,
+  });
+
+  @override
+  State<SettingsDialog> createState() => _SettingsDialogState();
+}
+
+class _SettingsDialogState extends State<SettingsDialog> {
+  late String? _selectedBrowser;
+  late String? _selectedMpv;
+  late TextEditingController _mpvCustomController;
+  bool _useCustomMpv = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedBrowser = widget.selectedBrowser;
+    _selectedMpv = widget.selectedMpv;
+    // Check if current mpv is custom (not in available list)
+    _useCustomMpv = widget.selectedMpv != null &&
+        !widget.availableMpv.contains(widget.selectedMpv);
+    _mpvCustomController = TextEditingController(
+      text: _useCustomMpv ? widget.selectedMpv : '',
+    );
+  }
+
+  @override
+  void dispose() {
+    _mpvCustomController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: const Color(0xFF1A1A2E),
+      title: const Text('Settings', style: TextStyle(color: Colors.white)),
+      content: SizedBox(
+        width: 400,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Browser section
+              const Text(
+                'Browser',
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              if (widget.availableBrowsers.isEmpty)
+                const Text(
+                  'No browsers found',
+                  style: TextStyle(color: Colors.white70),
+                )
+              else
+                ...widget.availableBrowsers.map((browser) {
+                  return RadioListTile<String>(
+                    title: Text(
+                      '${browser.name} (${browser.executable})',
+                      style: const TextStyle(color: Colors.white),
+                    ),
+                    value: browser.executable,
+                    groupValue: _selectedBrowser,
+                    activeColor: Colors.blue,
+                    onChanged: (value) {
+                      setState(() => _selectedBrowser = value);
+                      widget.onBrowserChanged(value);
+                    },
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                  );
+                }),
+
+              const SizedBox(height: 24),
+
+              // Mpv section
+              const Text(
+                'Video Player (mpv)',
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              if (widget.availableMpv.isEmpty && !_useCustomMpv)
+                const Text(
+                  'No mpv found on PATH',
+                  style: TextStyle(color: Colors.white70),
+                )
+              else
+                ...widget.availableMpv.map((mpv) {
+                  return RadioListTile<String>(
+                    title: Text(
+                      mpv,
+                      style: const TextStyle(color: Colors.white),
+                    ),
+                    value: mpv,
+                    groupValue: _useCustomMpv ? null : _selectedMpv,
+                    activeColor: Colors.blue,
+                    onChanged: (value) {
+                      setState(() {
+                        _useCustomMpv = false;
+                        _selectedMpv = value;
+                      });
+                      widget.onMpvChanged(value);
+                    },
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                  );
+                }),
+
+              RadioListTile<bool>(
+                title: const Text(
+                  'Custom path',
+                  style: TextStyle(color: Colors.white),
+                ),
+                value: true,
+                groupValue: _useCustomMpv,
+                activeColor: Colors.blue,
+                onChanged: (value) {
+                  setState(() => _useCustomMpv = true);
+                },
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+              ),
+
+              if (_useCustomMpv)
+                Padding(
+                  padding: const EdgeInsets.only(left: 16, right: 16, bottom: 8),
+                  child: TextField(
+                    controller: _mpvCustomController,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: const InputDecoration(
+                      hintText: '/path/to/mpv',
+                      hintStyle: TextStyle(color: Colors.white38),
+                      enabledBorder: UnderlineInputBorder(
+                        borderSide: BorderSide(color: Colors.white38),
+                      ),
+                      focusedBorder: UnderlineInputBorder(
+                        borderSide: BorderSide(color: Colors.blue),
+                      ),
+                    ),
+                    onChanged: (value) {
+                      setState(() => _selectedMpv = value);
+                      widget.onMpvChanged(value);
+                    },
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Close'),
+        ),
+      ],
     );
   }
 }

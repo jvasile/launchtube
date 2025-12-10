@@ -14,6 +14,9 @@ autologin-user-timeout=0
 
 ```
 $ sudo apt install caffeine mpv xscreensaver xscreensaver-gl-extra unclutter
+
+# Prevent rfkill warnings on wake from sleep
+sudo usermod -aG netdev guest
 ```
 
 As guest:

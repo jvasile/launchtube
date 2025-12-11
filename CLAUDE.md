@@ -12,4 +12,6 @@
     Slow down, ask more questions, get confirmation on the correct path.  Don't
     just rush off and start trying random things.  Investigate and discuss to
     find the correct path before rushing toward a solution.
-  * If needed, build after making changes.
+  * If needed, build after making changes.  Tell me what I need to do to test.
+    If I need to shift-reload, tell me that.  If I need to rerun the binary,
+    tell me that.

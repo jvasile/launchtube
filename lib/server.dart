@@ -136,6 +136,8 @@ class LaunchTubeServer {
       await _handleMatchRequest(request);
     } else if (request.uri.path.startsWith('/api/1/player/') || request.uri.path == '/api/1/browser/close') {
       await _handlePlayerRequest(request);
+    } else if (request.uri.path == '/api/1/log') {
+      await _handleLogRequest(request);
     } else if (request.uri.path.startsWith('/api/1/kv/')) {
       await _handleKvRequest(request);
     } else {
@@ -691,6 +693,33 @@ class LaunchTubeServer {
         ..statusCode = HttpStatus.notFound
         ..headers.contentType = ContentType.json
         ..write('{"error":"Unknown player endpoint"}')
+        ..close();
+    }
+  }
+
+  Future<void> _handleLogRequest(HttpRequest request) async {
+    if (request.method == 'POST') {
+      try {
+        final body = await utf8.decoder.bind(request).join();
+        final data = jsonDecode(body) as Map<String, dynamic>;
+        final message = data['message'] ?? '';
+        final level = data['level'] ?? 'info';
+        Log.write('[JS:$level] $message');
+        request.response
+          ..headers.contentType = ContentType.json
+          ..write('{"status":"ok"}')
+          ..close();
+      } catch (e) {
+        request.response
+          ..statusCode = HttpStatus.badRequest
+          ..headers.contentType = ContentType.json
+          ..write('{"error":"Invalid request"}')
+          ..close();
+      }
+    } else {
+      request.response
+        ..statusCode = HttpStatus.methodNotAllowed
+        ..write('Method not allowed')
         ..close();
     }
   }

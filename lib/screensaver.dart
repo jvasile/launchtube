@@ -29,6 +29,9 @@ class ScreensaverInhibitor {
   Future<void> start() async {
     if (_timer != null) return;
 
+    // Deactivate xscreensaver on startup in case it's currently running
+    await _inhibit();
+
     // Read xscreensaver timeout and set check interval to half of it
     await _readXscreensaverTimeout();
 

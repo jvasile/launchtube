@@ -11,7 +11,8 @@ class ScreensaverInhibitor {
   static ScreensaverInhibitor? _instance;
 
   Timer? _timer;
-  int? _cdpPort;
+  int? _debugPort;
+  String? _browserName;
   bool? _isNativeLinux;
   int _checkIntervalSeconds = 60; // Default, will be updated from xscreensaver config
 
@@ -20,9 +21,14 @@ class ScreensaverInhibitor {
     return _instance!;
   }
 
-  // Set the CDP port for browser video detection
-  void setCdpPort(int? port) {
-    _cdpPort = port;
+  // Set the browser info for video detection
+  void setBrowser(String? browserName, int? port) {
+    _browserName = browserName;
+    _debugPort = port;
+    // Check immediately when browser is set
+    if (browserName != null && port != null) {
+      _checkAndUpdate();
+    }
   }
 
   // Start the periodic check (call this when app starts)
@@ -118,13 +124,13 @@ class ScreensaverInhibitor {
       return true;
     }
 
-    // Check browser via CDP
-    if (_cdpPort != null) {
+    // Check browser via remote debugging
+    if (_debugPort != null && _browserName != null) {
       try {
         final playing = await _checkBrowserVideoPlaying();
         if (playing) return true;
       } catch (_) {
-        // CDP check failed, ignore
+        // Browser check failed, ignore
       }
     }
 
@@ -132,13 +138,30 @@ class ScreensaverInhibitor {
   }
 
   Future<bool> _checkBrowserVideoPlaying() async {
-    if (_cdpPort == null) return false;
+    if (_debugPort == null) {
+      debugPrint('ScreensaverInhibitor: No debug port set');
+      return false;
+    }
 
+    debugPrint('ScreensaverInhibitor: Checking browser "$_browserName" on port $_debugPort');
+
+    if (_browserName == 'Firefox') {
+      final result = await _checkFirefoxVideoPlaying();
+      debugPrint('ScreensaverInhibitor: Firefox fullscreen video playing: $result');
+      return result;
+    } else {
+      final result = await _checkChromeVideoPlaying();
+      debugPrint('ScreensaverInhibitor: Chrome fullscreen video playing: $result');
+      return result;
+    }
+  }
+
+  // Chrome DevTools Protocol
+  Future<bool> _checkChromeVideoPlaying() async {
     try {
-      // Get list of targets from CDP
       final client = HttpClient();
       final request = await client.getUrl(
-        Uri.parse('http://localhost:$_cdpPort/json/list'),
+        Uri.parse('http://localhost:$_debugPort/json/list'),
       ).timeout(const Duration(seconds: 2));
       final response = await request.close();
 
@@ -156,24 +179,154 @@ class ScreensaverInhibitor {
         if (target['type'] == 'page') {
           final wsUrl = target['webSocketDebuggerUrl'] as String?;
           if (wsUrl != null) {
-            final playing = await _checkPageForVideo(wsUrl);
+            final playing = await _checkChromePageForVideo(wsUrl);
             if (playing) return true;
           }
         }
       }
     } catch (e) {
-      debugPrint('ScreensaverInhibitor: CDP check failed: $e');
+      debugPrint('ScreensaverInhibitor: Chrome CDP check failed: $e');
     }
 
     return false;
   }
 
-  Future<bool> _checkPageForVideo(String wsUrl) async {
+  // Firefox WebDriver BiDi protocol
+  Future<bool> _checkFirefoxVideoPlaying() async {
+    WebSocket? ws;
+    try {
+      // Connect to WebDriver BiDi WebSocket on /session path
+      ws = await WebSocket.connect('ws://127.0.0.1:$_debugPort/session')
+          .timeout(const Duration(seconds: 2));
+
+      final completer = Completer<bool>();
+      String? contextId;
+      bool? videoPlayingResult;
+
+      ws.listen((data) {
+        try {
+          final response = jsonDecode(data as String);
+          debugPrint('ScreensaverInhibitor: Firefox BiDi response: $response');
+
+          // Handle session.new response
+          if (response['id'] == 1 && response['result'] != null) {
+            debugPrint('ScreensaverInhibitor: Session created, getting tree');
+            // Session created, now get the browsing contexts
+            final getTreeCommand = jsonEncode({
+              'id': 2,
+              'method': 'browsingContext.getTree',
+              'params': {},
+            });
+            ws?.add(getTreeCommand);
+          }
+          // Handle browsingContext.getTree response
+          else if (response['id'] == 2 && response['result'] != null) {
+            final contexts = response['result']['contexts'] as List<dynamic>?;
+            if (contexts != null && contexts.isNotEmpty) {
+              // Get the first top-level context
+              contextId = contexts[0]['context'] as String?;
+              debugPrint('ScreensaverInhibitor: Got context: $contextId');
+
+              if (contextId != null) {
+                // Now evaluate script to check for playing fullscreen videos
+                final evalCommand = jsonEncode({
+                  'id': 3,
+                  'method': 'script.evaluate',
+                  'params': {
+                    'expression': '''
+                      (function() {
+                        // Only inhibit if there's a playing video AND we're in fullscreen
+                        if (!document.fullscreenElement) {
+                          return false;
+                        }
+                        const videos = document.querySelectorAll('video');
+                        for (const v of videos) {
+                          if (!v.paused && !v.ended && v.readyState > 2) {
+                            return true;
+                          }
+                        }
+                        return false;
+                      })()
+                    ''',
+                    'target': {'context': contextId},
+                    'awaitPromise': false,
+                  },
+                });
+                ws?.add(evalCommand);
+              } else {
+                if (!completer.isCompleted) completer.complete(false);
+              }
+            } else {
+              if (!completer.isCompleted) completer.complete(false);
+            }
+          }
+          // Handle script.evaluate response
+          else if (response['id'] == 3 && response['result'] != null) {
+            final result = response['result']['result'];
+            final value = result?['value'];
+            debugPrint('ScreensaverInhibitor: Script result: $value');
+
+            // Store the result, then end the session
+            videoPlayingResult = value == true;
+
+            // End the session before completing
+            final endSessionCommand = jsonEncode({
+              'id': 4,
+              'method': 'session.end',
+              'params': {},
+            });
+            ws?.add(endSessionCommand);
+          }
+          // Handle session.end response - now we can complete
+          else if (response['id'] == 4) {
+            debugPrint('ScreensaverInhibitor: Session ended');
+            if (!completer.isCompleted) {
+              completer.complete(videoPlayingResult ?? false);
+            }
+          }
+          // Handle errors
+          else if (response['error'] != null) {
+            debugPrint('ScreensaverInhibitor: BiDi error: ${response['error']}');
+            if (!completer.isCompleted) completer.complete(false);
+          }
+        } catch (e) {
+          debugPrint('ScreensaverInhibitor: Firefox BiDi parse error: $e');
+        }
+      }, onError: (e) {
+        debugPrint('ScreensaverInhibitor: Firefox BiDi socket error: $e');
+        if (!completer.isCompleted) completer.complete(false);
+      }, onDone: () {
+        if (!completer.isCompleted) completer.complete(false);
+      });
+
+      // Start by creating a session
+      final newSessionCommand = jsonEncode({
+        'id': 1,
+        'method': 'session.new',
+        'params': {'capabilities': {}},
+      });
+      ws.add(newSessionCommand);
+
+      // Timeout
+      Future.delayed(const Duration(seconds: 3), () {
+        if (!completer.isCompleted) completer.complete(false);
+      });
+
+      final result = await completer.future;
+      await ws.close();
+      return result;
+    } catch (e) {
+      debugPrint('ScreensaverInhibitor: Firefox BiDi check failed: $e');
+      await ws?.close();
+      return false;
+    }
+  }
+
+  Future<bool> _checkChromePageForVideo(String wsUrl) async {
     try {
       final ws = await WebSocket.connect(wsUrl).timeout(const Duration(seconds: 2));
 
-      // Query for video elements that are playing
-      // Using Runtime.evaluate to check document.querySelector('video')
+      // Query for playing fullscreen video
       final messageId = DateTime.now().millisecondsSinceEpoch;
       final command = jsonEncode({
         'id': messageId,
@@ -181,6 +334,10 @@ class ScreensaverInhibitor {
         'params': {
           'expression': '''
             (function() {
+              // Only inhibit if there's a playing video AND we're in fullscreen
+              if (!document.fullscreenElement) {
+                return false;
+              }
               const videos = document.querySelectorAll('video');
               for (const v of videos) {
                 if (!v.paused && !v.ended && v.readyState > 2) {

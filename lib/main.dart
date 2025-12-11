@@ -26,9 +26,7 @@ void main(List<String> args) async {
   Log.write('Asset directory: ${getAssetDirectory()}');
 
   // Start screensaver inhibitor (checks mpv and browser for video playback)
-  final screensaverInhibitor = ScreensaverInhibitor.getInstance();
-  screensaverInhibitor.setCdpPort(9222);
-  screensaverInhibitor.start();
+  ScreensaverInhibitor.getInstance().start();
 
   runApp(const LaunchTubeApp());
 }

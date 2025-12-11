@@ -12,6 +12,7 @@ import 'models.dart';
 import 'services.dart';
 import 'player.dart';
 import 'server.dart';
+import 'screensaver.dart';
 
 class LaunchTubeApp extends StatelessWidget {
   const LaunchTubeApp({super.key});
@@ -311,11 +312,15 @@ class _LauncherHomeState extends State<LauncherHome> {
         _browserProcess = await Process.start(selectedBrowser.executable, args);
         Log.write('Browser started with PID: ${_browserProcess!.pid}');
 
+        // Tell screensaver inhibitor about the browser
+        ScreensaverInhibitor.getInstance().setBrowser(selectedBrowser.name, debugPort);
+
         // Clear reference if process exits on its own
         _browserProcess!.exitCode.then((_) {
           Log.write('Browser process exited');
           _browserProcess = null;
           _launchedBrowser = null;
+          ScreensaverInhibitor.getInstance().setBrowser(null, null);
         });
       } else {
         final parts = app.commandLine!.split(' ').where((s) => s.isNotEmpty).toList();
@@ -361,6 +366,7 @@ class _LauncherHomeState extends State<LauncherHome> {
 
     _browserProcess = null;
     _launchedBrowser = null;
+    ScreensaverInhibitor.getInstance().setBrowser(null, null);
   }
 
   void _openAdminBrowser() async {
@@ -425,10 +431,14 @@ class _LauncherHomeState extends State<LauncherHome> {
       _browserProcess = await Process.start(selectedBrowser.executable, args);
       Log.write('Admin browser started with PID: ${_browserProcess!.pid}');
 
+      // Tell screensaver inhibitor about the browser
+      ScreensaverInhibitor.getInstance().setBrowser(selectedBrowser.name, 9222);
+
       _browserProcess!.exitCode.then((_) {
         Log.write('Admin browser process exited');
         _browserProcess = null;
         _launchedBrowser = null;
+        ScreensaverInhibitor.getInstance().setBrowser(null, null);
       });
     } catch (e) {
       if (mounted) {

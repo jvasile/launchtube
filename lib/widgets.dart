@@ -294,11 +294,9 @@ class _LauncherHomeState extends State<LauncherHome> {
           _showBrowserWarning(runningBrowsers, selectedBrowser.name);
         }
 
-        // Build args - simple, no profile hacks
+        // Build args - always fullscreen
         final args = <String>[];
-        if (app.kioskMode) {
-          args.add(selectedBrowser.fullscreenFlag);
-        }
+        args.add(selectedBrowser.fullscreenFlag);
 
         // Add remote debugging port for server-side extension detection
         const debugPort = 9222;
@@ -363,6 +361,85 @@ class _LauncherHomeState extends State<LauncherHome> {
 
     _browserProcess = null;
     _launchedBrowser = null;
+  }
+
+  void _openAdminBrowser() async {
+    // Check if browser is already running
+    if (_browserProcess != null) {
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Browser Running'),
+          content: const Text('Please close the browser before opening admin mode.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    // Find an available browser
+    BrowserInfo? selectedBrowser;
+    List<String> runningBrowsers = [];
+    Set<String> seenNames = {};
+
+    for (final browser in _availableBrowsers) {
+      if (await _isBrowserRunning(browser.executable)) {
+        if (!seenNames.contains(browser.name)) {
+          runningBrowsers.add(browser.name);
+          seenNames.add(browser.name);
+        }
+      } else if (selectedBrowser == null) {
+        selectedBrowser = browser;
+      }
+    }
+
+    if (selectedBrowser == null) {
+      _showBrowserError(runningBrowsers);
+      return;
+    }
+
+    if (runningBrowsers.isNotEmpty) {
+      _showBrowserWarning(runningBrowsers, selectedBrowser.name);
+    }
+
+    try {
+      // Open in non-kiosk mode for admin access
+      final args = <String>[];
+      // Use --start-fullscreen for Chrome/Chromium, nothing for Firefox (no equivalent)
+      if (selectedBrowser.name != 'Firefox') {
+        args.add('--start-fullscreen');
+      }
+      args.add('--remote-debugging-port=9222');
+
+      final setupUrl = 'http://localhost:${_server.port}/setup?target=';
+      args.add(setupUrl);
+
+      Log.write('Opening admin browser: ${selectedBrowser.executable} ${args.join(' ')}');
+      _launchedBrowser = selectedBrowser;
+      _browserProcess = await Process.start(selectedBrowser.executable, args);
+      Log.write('Admin browser started with PID: ${_browserProcess!.pid}');
+
+      _browserProcess!.exitCode.then((_) {
+        Log.write('Admin browser process exited');
+        _browserProcess = null;
+        _launchedBrowser = null;
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to open admin browser: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   void _handleKeyEvent(KeyEvent event) {
@@ -610,8 +687,8 @@ class _LauncherHomeState extends State<LauncherHome> {
                           case 'settings':
                             _showSettingsDialog();
                             break;
-                          case 'install_userscript':
-                            _server.openUserscriptInstall();
+                          case 'admin_browser':
+                            _openAdminBrowser();
                             break;
                           case 'about':
                             _showAboutDialog();
@@ -632,12 +709,12 @@ class _LauncherHomeState extends State<LauncherHome> {
                           ),
                         ),
                         const PopupMenuItem(
-                          value: 'install_userscript',
+                          value: 'admin_browser',
                           child: Row(
                             children: [
-                              Icon(Icons.extension, color: Colors.white70),
+                              Icon(Icons.admin_panel_settings, color: Colors.white70),
                               SizedBox(width: 12),
-                              Text('Install Browser Userscript'),
+                              Text('Administer Browser'),
                             ],
                           ),
                         ),
@@ -1210,7 +1287,6 @@ class _AppConfigDialogState extends State<AppConfigDialog> {
   late TextEditingController _commandLineController;
   late TextEditingController _imagePathController;
   late AppType _type;
-  late bool _kioskMode;
   late bool _showName;
   late Color _selectedColor;
 
@@ -1222,7 +1298,6 @@ class _AppConfigDialogState extends State<AppConfigDialog> {
     _commandLineController = TextEditingController(text: widget.app.commandLine ?? '');
     _imagePathController = TextEditingController(text: widget.app.imagePath ?? '');
     _type = widget.app.type;
-    _kioskMode = widget.app.kioskMode;
     _showName = widget.app.showName;
     _selectedColor = Color(widget.app.colorValue);
   }
@@ -1315,7 +1390,6 @@ class _AppConfigDialogState extends State<AppConfigDialog> {
 
     widget.app.name = _nameController.text;
     widget.app.url = _type == AppType.website ? _urlController.text : null;
-    widget.app.kioskMode = _kioskMode;
     widget.app.commandLine = _type == AppType.native ? _commandLineController.text : null;
     widget.app.type = _type;
     widget.app.imagePath = _imagePathController.text.isEmpty ? null : _imagePathController.text;
@@ -1370,7 +1444,7 @@ class _AppConfigDialogState extends State<AppConfigDialog> {
                 },
               ),
               const SizedBox(height: 16),
-              if (_type == AppType.website) ...[
+              if (_type == AppType.website)
                 TextField(
                   controller: _urlController,
                   decoration: const InputDecoration(
@@ -1379,18 +1453,6 @@ class _AppConfigDialogState extends State<AppConfigDialog> {
                     border: OutlineInputBorder(),
                   ),
                 ),
-                const SizedBox(height: 12),
-                CheckboxListTile(
-                  title: const Text('Kiosk Mode', style: TextStyle(color: Colors.white)),
-                  subtitle: Text(
-                    'Opens in fullscreen without browser UI',
-                    style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 12),
-                  ),
-                  value: _kioskMode,
-                  onChanged: (value) => setState(() => _kioskMode = value ?? true),
-                  contentPadding: EdgeInsets.zero,
-                ),
-              ],
               if (_type == AppType.native)
                 TextField(
                   controller: _commandLineController,

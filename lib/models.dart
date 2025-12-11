@@ -6,7 +6,6 @@ enum AppType { website, native }
 class AppConfig {
   String name;
   String? url;
-  bool kioskMode;
   String? commandLine;
   AppType type;
   String? imagePath;
@@ -16,7 +15,6 @@ class AppConfig {
   AppConfig({
     required this.name,
     this.url,
-    this.kioskMode = true,
     this.commandLine,
     required this.type,
     this.imagePath,
@@ -29,7 +27,6 @@ class AppConfig {
   Map<String, dynamic> toJson() => {
         'name': name,
         'url': url,
-        'kioskMode': kioskMode,
         'commandLine': commandLine,
         'type': type.index,
         'imagePath': imagePath,
@@ -40,7 +37,6 @@ class AppConfig {
   factory AppConfig.fromJson(Map<String, dynamic> json) => AppConfig(
         name: json['name'],
         url: json['url'],
-        kioskMode: json['kioskMode'] ?? true,
         commandLine: json['commandLine'],
         type: AppType.values[json['type']],
         imagePath: json['imagePath'],
@@ -51,7 +47,6 @@ class AppConfig {
   AppConfig copy() => AppConfig(
         name: name,
         url: url,
-        kioskMode: kioskMode,
         commandLine: commandLine,
         type: type,
         imagePath: imagePath,
@@ -132,7 +127,6 @@ class ServiceTemplate {
     name: name,
     url: url,
     type: AppType.website,
-    kioskMode: true,
     colorValue: colorValue,
     imagePath: logoPath,
     showName: logoPath == null,

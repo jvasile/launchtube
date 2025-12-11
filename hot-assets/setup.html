@@ -114,12 +114,27 @@
 
             document.getElementById('step2').classList.add('complete');
             document.getElementById('step2-status').className = 'status success';
-            document.getElementById('step2-status').textContent = 'Loader script is installed and working!';
             document.getElementById('step2-install').classList.add('hidden');
 
-            // Redirect immediately
-            window.open(targetUrl, '_self');
+            // Redirect to target or show completion message
+            if (targetUrl && targetUrl !== '/') {
+                document.getElementById('step2-status').textContent = 'Loader script is installed and working!';
+                window.open(targetUrl, '_self');
+            } else {
+                document.getElementById('step2-status').innerHTML = 'Setup complete! <button class="btn" onclick="closeBrowser()" style="margin-left: 12px; border: none; cursor: pointer;">Return to Launcher</button>';
+            }
         }
+
+        async function closeBrowser() {
+            await fetch('/api/1/browser/close', { method: 'POST' });
+        }
+
+        // Allow Escape key to close browser and return to launcher
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                closeBrowser();
+            }
+        });
 
         // Install userscript manager and poll for detection
         async function installUserscriptManager() {
@@ -189,13 +204,55 @@
             return null;
         }
 
+        // Show manual setup flow for Firefox (server-side detection doesn't work)
+        function showFirefoxManualFlow() {
+            const isFirefox = navigator.userAgent.toLowerCase().includes('firefox');
+            const storeUrl = isFirefox
+                ? 'https://addons.mozilla.org/firefox/addon/tampermonkey/'
+                : 'https://chrome.google.com/webstore/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo';
+
+            document.getElementById('step1-status').className = 'status checking';
+            document.getElementById('step1-status').textContent = 'Install a userscript manager if you haven\'t already:';
+            document.getElementById('step1-install').innerHTML = `
+                <p><a class="btn" href="${storeUrl}" target="_blank">Install Tampermonkey</a></p>
+                <p style="margin-top: 12px; opacity: 0.7;">Already installed? Continue to step 2.</p>
+            `;
+            document.getElementById('step1-install').classList.remove('hidden');
+
+            document.getElementById('step2-status').className = 'status checking';
+            document.getElementById('step2-status').textContent = 'Install the LaunchTube loader script:';
+            document.getElementById('step2-install').innerHTML = `
+                <p><a class="btn" href="/launchtube-loader.user.js" target="_blank">Install Loader Script</a></p>
+                <p style="margin-top: 16px;"><button class="btn secondary" onclick="proceedToTarget()" style="border: none; cursor: pointer;">Done - Return to Launcher</button></p>
+            `;
+            document.getElementById('step2-install').classList.remove('hidden');
+        }
+
+        function proceedToTarget() {
+            if (targetUrl && targetUrl !== '/') {
+                window.open(targetUrl, '_self');
+            } else {
+                // No target - close browser to return to launcher
+                closeBrowser();
+            }
+        }
+
         // Main detection flow
         async function runDetection() {
+            const isFirefox = navigator.userAgent.toLowerCase().includes('firefox');
+
             // First check if loader is already working (both installed)
             await new Promise(r => setTimeout(r, 2000));
             if (setupComplete) return;
 
-            // Try to detect userscript manager
+            // Firefox: server-side extension detection doesn't work, show manual flow
+            if (isFirefox) {
+                console.log('LaunchTube: Firefox detected, showing manual setup flow');
+                showFirefoxManualFlow();
+                return;
+            }
+
+            // Chrome/Edge: Try to detect userscript manager via CDP
             const manager = await detectUserscriptManager();
             if (manager) {
                 console.log('LaunchTube: Userscript manager detected: ' + manager + ', auto-installing loader');

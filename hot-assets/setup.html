@@ -78,7 +78,7 @@
     </style>
 </head>
 <body>
-    <div class="container">
+    <div class="container" id="main-container" style="display: none;">
         <h1>LaunchTube Setup</h1>
 
         <div class="step" id="step1">
@@ -98,14 +98,27 @@
     </div>
 
     <script>
-        const targetUrl = new URLSearchParams(location.search).get('target') || '/';
+        const targetUrl = new URLSearchParams(location.search).get('target');
+        const hasTarget = targetUrl && targetUrl !== '/';
         let setupComplete = false;
         let step1Complete = false;
+        let loaderCheckDone = false;
+
+        // Show the setup UI
+        function showSetupUI() {
+            document.getElementById('main-container').style.display = '';
+        }
 
         // Mark everything complete and redirect
         function markAllComplete() {
             if (setupComplete) return;
             setupComplete = true;
+
+            // If we have a target and haven't shown UI yet, just redirect silently
+            if (hasTarget && !loaderCheckDone) {
+                window.open(targetUrl, '_self');
+                return;
+            }
 
             document.getElementById('step1').classList.add('complete');
             document.getElementById('step1-status').className = 'status success';
@@ -117,7 +130,7 @@
             document.getElementById('step2-install').classList.add('hidden');
 
             // Redirect to target or show completion message
-            if (targetUrl && targetUrl !== '/') {
+            if (hasTarget) {
                 document.getElementById('step2-status').textContent = 'Loader script is installed and working!';
                 window.open(targetUrl, '_self');
             } else {
@@ -241,9 +254,28 @@
         async function runDetection() {
             const isFirefox = navigator.userAgent.toLowerCase().includes('firefox');
 
-            // First check if loader is already working (both installed)
-            await new Promise(r => setTimeout(r, 2000));
+            // Wait briefly for loader to announce itself via postMessage
+            // If it does and we have a target, redirect immediately without showing UI
+            await new Promise(r => setTimeout(r, 500));
             if (setupComplete) return;
+
+            // Mark initial loader check as done - if we proceed, we'll show UI
+            loaderCheckDone = true;
+
+            // No target URL means we're in admin mode - always show setup UI
+            if (!hasTarget) {
+                showSetupUI();
+                if (isFirefox) {
+                    showFirefoxManualFlow();
+                } else {
+                    // For Chrome, still do the detection flow but with UI visible
+                    runChromeDetection();
+                }
+                return;
+            }
+
+            // We have a target but loader didn't respond - need setup
+            showSetupUI();
 
             // Firefox: server-side extension detection doesn't work, show manual flow
             if (isFirefox) {
@@ -252,6 +284,10 @@
                 return;
             }
 
+            runChromeDetection();
+        }
+
+        async function runChromeDetection() {
             // Chrome/Edge: Try to detect userscript manager via CDP
             const manager = await detectUserscriptManager();
             if (manager) {

@@ -75,16 +75,6 @@
             background: rgba(255,255,255,0.2);
         }
         .hidden { display: none; }
-        #redirect-info {
-            margin-top: 40px;
-            text-align: center;
-            font-size: 1.2em;
-        }
-        #countdown {
-            font-size: 2em;
-            font-weight: bold;
-            color: #4caf50;
-        }
     </style>
 </head>
 <body>
@@ -105,9 +95,6 @@
             <div id="step2-install" class="hidden"></div>
         </div>
 
-        <div id="redirect-info" class="hidden">
-            <p>Setup complete! Redirecting in <span id="countdown">3</span>...</p>
-        </div>
     </div>
 
     <script>
@@ -130,7 +117,8 @@
             document.getElementById('step2-status').textContent = 'Loader script is installed and working!';
             document.getElementById('step2-install').classList.add('hidden');
 
-            startRedirect();
+            // Redirect immediately
+            window.open(targetUrl, '_self');
         }
 
         // Install userscript manager and poll for detection
@@ -174,25 +162,6 @@
                     }, 500);
                 }
             }, 2000);
-        }
-
-        // Start countdown and redirect
-        function startRedirect() {
-            const info = document.getElementById('redirect-info');
-            const countdown = document.getElementById('countdown');
-            info.classList.remove('hidden');
-
-            let seconds = 3;
-            countdown.textContent = seconds;
-            const timer = setInterval(() => {
-                seconds--;
-                countdown.textContent = seconds;
-                if (seconds <= 0) {
-                    clearInterval(timer);
-                    // Open target in this window - makes window.close() work later
-                    window.open(targetUrl, '_self');
-                }
-            }, 1000);
         }
 
         // Listen for loader script to announce itself (means BOTH are working)

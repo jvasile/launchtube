@@ -222,13 +222,27 @@ class _LauncherHomeState extends State<LauncherHome> {
 
   void _showBrowserWarning(List<String> running, String using) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('${running.join(", ")} already running. Using $using instead.'),
-        duration: const Duration(seconds: 2),
-        backgroundColor: Colors.orange,
+    // Show a brief centered overlay that doesn't block
+    final overlay = OverlayEntry(
+      builder: (context) => Center(
+        child: Material(
+          color: Colors.transparent,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 96, vertical: 64),
+            decoration: BoxDecoration(
+              color: Colors.orange.withAlpha(230),
+              borderRadius: BorderRadius.circular(32),
+            ),
+            child: Text(
+              '${running.join(", ")} already running. Using $using.',
+              style: const TextStyle(color: Colors.white, fontSize: 64),
+            ),
+          ),
+        ),
       ),
     );
+    Overlay.of(context).insert(overlay);
+    Future.delayed(const Duration(milliseconds: 1500), () => overlay.remove());
   }
 
   void _showBrowserError(List<String> running) {

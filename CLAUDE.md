@@ -12,3 +12,4 @@
     Slow down, ask more questions, get confirmation on the correct path.  Don't
     just rush off and start trying random things.  Investigate and discuss to
     find the correct path before rushing toward a solution.
+  * If needed, build after making changes.

@@ -6,6 +6,29 @@ import 'package:path_provider/path_provider.dart';
 
 import 'models.dart';
 
+// Global logger that writes to file
+class Log {
+  static File? _logFile;
+  static RandomAccessFile? _raf;
+
+  static Future<void> init() async {
+    final dir = await getApplicationSupportDirectory();
+    _logFile = File('${dir.path}/launchtube.log');
+    // Truncate on startup
+    _raf = await _logFile!.open(mode: FileMode.write);
+    final header = '=== LaunchTube started at ${DateTime.now()} ===\n';
+    await _raf!.writeString(header);
+    await _raf!.flush();
+  }
+
+  static void write(String message) {
+    final line = '${DateTime.now().toIso8601String()} $message\n';
+    print(line.trimRight()); // Also print to stdout
+    _raf?.writeStringSync(line);
+    _raf?.flushSync();
+  }
+}
+
 // Service library loader
 class ServiceLibraryLoader {
   static Future<List<ServiceTemplate>> loadServices() async {

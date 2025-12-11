@@ -54,6 +54,7 @@ class _LauncherHomeState extends State<LauncherHome> {
 
   // Track launched browser process for closing
   Process? _browserProcess;
+  BrowserInfo? _launchedBrowser;
 
   @override
   void initState() {
@@ -198,6 +199,55 @@ class _LauncherHomeState extends State<LauncherHome> {
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   }
 
+  Future<bool> _isBrowserRunning(String executable) async {
+    // For Windows executables on WSL, check Windows processes
+    if (executable.endsWith('.exe')) {
+      try {
+        final exeName = executable.split('/').last;
+        final result = await Process.run('tasklist.exe', ['/FI', 'IMAGENAME eq $exeName', '/NH']);
+        return result.stdout.toString().toLowerCase().contains(exeName.toLowerCase());
+      } catch (_) {
+        return false;
+      }
+    } else {
+      // Native Linux: use pgrep
+      try {
+        final result = await Process.run('pgrep', ['-x', executable]);
+        return result.exitCode == 0;
+      } catch (_) {
+        return false;
+      }
+    }
+  }
+
+  void _showBrowserWarning(List<String> running, String using) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('${running.join(", ")} already running. Using $using instead.'),
+        duration: const Duration(seconds: 2),
+        backgroundColor: Colors.orange,
+      ),
+    );
+  }
+
+  void _showBrowserError(List<String> running) {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Browser In Use'),
+        content: Text('Please close ${running.join(" or ")} before launching.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _launchApp(AppConfig app) async {
     // Stop any running player and close any existing browser first
     await ExternalPlayer.getInstance().stop();
@@ -205,25 +255,48 @@ class _LauncherHomeState extends State<LauncherHome> {
 
     try {
       if (app.type == AppType.website) {
-        if (_selectedBrowser == null) {
-          throw Exception('No browser available');
+        // Find a browser that isn't already running
+        BrowserInfo? selectedBrowser;
+        List<String> runningBrowsers = [];
+        Set<String> seenNames = {};
+
+        for (final browser in _availableBrowsers) {
+          if (await _isBrowserRunning(browser.executable)) {
+            if (!seenNames.contains(browser.name)) {
+              runningBrowsers.add(browser.name);
+              seenNames.add(browser.name);
+            }
+          } else if (selectedBrowser == null) {
+            selectedBrowser = browser;
+          }
         }
-        final browser = _availableBrowsers.firstWhere(
-          (b) => b.executable == _selectedBrowser,
-        );
+
+        if (selectedBrowser == null) {
+          _showBrowserError(runningBrowsers);
+          return;
+        }
+
+        if (runningBrowsers.isNotEmpty) {
+          _showBrowserWarning(runningBrowsers, selectedBrowser.name);
+        }
+
+        // Build args - simple, no profile hacks
         final args = <String>[];
-        // Always use new window so we get a dedicated window we can close
-        args.add(browser.newWindowFlag);
         if (app.kioskMode) {
-          args.add(browser.kioskFlag);
+          args.add(selectedBrowser.kioskFlag);
         }
         args.add(app.url!);
 
-        // Track browser process so we can close it later
-        _browserProcess = await Process.start(browser.executable, args);
-        // Don't wait for it to exit, just let it run
+        Log.write('Launching browser: ${selectedBrowser.executable} ${args.join(' ')}');
+        _launchedBrowser = selectedBrowser;
+        _browserProcess = await Process.start(selectedBrowser.executable, args);
+        Log.write('Browser started with PID: ${_browserProcess!.pid}');
+
+        // Clear reference if process exits on its own
         _browserProcess!.exitCode.then((_) {
+          Log.write('Browser process exited');
           _browserProcess = null;
+          _launchedBrowser = null;
         });
       } else {
         final parts = app.commandLine!.split(' ').where((s) => s.isNotEmpty).toList();
@@ -244,10 +317,31 @@ class _LauncherHomeState extends State<LauncherHome> {
   }
 
   Future<void> _closeBrowser() async {
-    if (_browserProcess != null) {
-      _browserProcess!.kill();
-      _browserProcess = null;
+    if (_browserProcess == null) {
+      Log.write('No browser process to close');
+      return;
     }
+
+    final pid = _browserProcess!.pid;
+    Log.write('Closing browser process PID: $pid');
+
+    if (_launchedBrowser?.executable.endsWith('.exe') ?? false) {
+      try {
+        final result = await Process.run('taskkill.exe', ['/F', '/PID', pid.toString()]);
+        Log.write('taskkill result: ${result.exitCode}');
+      } catch (e) {
+        Log.write('taskkill failed: $e');
+      }
+    } else {
+      try {
+        _browserProcess!.kill(ProcessSignal.sigterm);
+      } catch (e) {
+        Log.write('SIGTERM failed: $e');
+      }
+    }
+
+    _browserProcess = null;
+    _launchedBrowser = null;
   }
 
   void _handleKeyEvent(KeyEvent event) {

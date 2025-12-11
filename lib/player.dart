@@ -329,8 +329,9 @@ class ExternalPlayer {
 
   Future<void> stop() async {
     if (_process != null) {
+      // Try graceful quit via IPC (Unix sockets - works on Linux)
+      bool ipcWorked = false;
       try {
-        // Try graceful quit via IPC
         final socket = await Socket.connect(
           InternetAddress(_ipcPath, type: InternetAddressType.unix),
           0,
@@ -340,9 +341,19 @@ class ExternalPlayer {
         socket.write(quitCmd);
         await socket.flush();
         socket.close();
+        ipcWorked = true;
       } catch (_) {
-        // IPC failed, kill process
-        _process?.kill();
+        // IPC failed (expected on Windows/WSL)
+      }
+
+      // Always try to kill the process as fallback
+      if (!ipcWorked) {
+        try {
+          _process?.kill(ProcessSignal.sigterm);
+        } catch (_) {}
+        try {
+          _process?.kill(ProcessSignal.sigkill);
+        } catch (_) {}
       }
       _process = null;
     }

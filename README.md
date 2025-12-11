@@ -19,6 +19,13 @@ $ sudo apt install caffeine mpv xscreensaver xscreensaver-gl-extra unclutter
 sudo usermod -aG netdev guest
 ```
 
+Let's try to do slidehow without xscreensaver.  We'll use glslideshow, which is
+in the xscreensaver-gl package.
+
+```
+$ sudo apt install xscreensaver-gl xss-lock
+```
+
 As guest:
 ```
 $ gsettings set org.gnome.desktop.screensaver lock-enabled false

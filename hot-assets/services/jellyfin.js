@@ -275,10 +275,20 @@
 
         cancelBtn.addEventListener('click', hideExitConfirmation);
         exitBtn.addEventListener('click', () => {
+            console.log('[LaunchTube] Exit button clicked');
             hideModal(true);
             hideExitConfirmation();
+            console.log('[LaunchTube] Calling browser/close API at', LAUNCH_TUBE_URL);
             fetch(`${LAUNCH_TUBE_URL}/api/1/browser/close`, { method: 'POST' })
-                .catch(() => window.close()); // Fallback to window.close
+                .then(r => {
+                    console.log('[LaunchTube] browser/close response:', r.status);
+                    return r.text();
+                })
+                .then(t => console.log('[LaunchTube] browser/close body:', t))
+                .catch(e => {
+                    console.log('[LaunchTube] browser/close error:', e);
+                    window.close();
+                });
         });
 
         // Also handle keyboard in confirmation dialog

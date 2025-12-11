@@ -19,8 +19,9 @@ void main(List<String> args) async {
   }
 
   WidgetsFlutterBinding.ensureInitialized();
-  // Initialize app support dir, then log asset directory at startup
+  // Initialize app support dir and logging
   await initAppSupportDir();
-  getAssetDirectory();
+  await Log.init();
+  Log.write('Asset directory: ${getAssetDirectory()}');
   runApp(const LaunchTubeApp());
 }

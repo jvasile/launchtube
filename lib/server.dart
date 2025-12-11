@@ -574,13 +574,17 @@ class LaunchTubeServer {
         ..write('{"status":"ok"}')
         ..close();
     } else if (path == '/api/1/browser/close' && request.method == 'POST') {
+      Log.write('API: /api/1/browser/close called');
       if (_closeBrowser != null) {
+        Log.write('API: Calling _closeBrowser callback');
         await _closeBrowser!();
+        Log.write('API: _closeBrowser callback completed');
         request.response
           ..headers.contentType = ContentType.json
           ..write('{"status":"ok"}')
           ..close();
       } else {
+        Log.write('API: _closeBrowser callback is null');
         request.response
           ..statusCode = HttpStatus.serviceUnavailable
           ..headers.contentType = ContentType.json

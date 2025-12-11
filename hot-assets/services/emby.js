@@ -374,21 +374,10 @@
         return response.json();
     }
 
-    // Generate random alphanumeric string for PlaySessionId
-    function generatePlaySessionId() {
-        const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-        let result = '';
-        for (let i = 0; i < 32; i++) {
-            result += chars.charAt(Math.floor(Math.random() * chars.length));
-        }
-        return result;
-    }
-
     // Build stream URL for item
-    function buildStreamUrl(itemId, mediaSourceId) {
+    function buildStreamUrl(itemId, mediaSourceId, playSessionId) {
         const { serverUrl, token } = getServerInfo();
         // Use Emby's direct stream endpoint - requires MediaSourceId and PlaySessionId
-        const playSessionId = generatePlaySessionId();
         let url = `${serverUrl}/emby/videos/${itemId}/stream?static=true&api_key=${encodeURIComponent(token)}`;
         url += `&PlaySessionId=${playSessionId}`;
         if (mediaSourceId) {
@@ -397,8 +386,34 @@
         return url;
     }
 
+    // Report playback start to Emby (creates a session)
+    async function reportPlaybackStart(itemId, mediaSourceId, playSessionId) {
+        const { serverUrl, token } = getServerInfo();
+        try {
+            const body = {
+                ItemId: itemId,
+                MediaSourceId: mediaSourceId || itemId,
+                CanSeek: true,
+                PlayMethod: 'DirectPlay',
+                PlaySessionId: playSessionId,
+            };
+            serverLog(`Reporting playback start: ${JSON.stringify(body)}`);
+            const response = await fetch(`${serverUrl}/Sessions/Playing`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Emby-Token': token,
+                },
+                body: JSON.stringify(body),
+            });
+            serverLog(`Playback start response: ${response.status}`);
+        } catch (e) {
+            serverLog(`Failed to report playback start: ${e.message}`, 'error');
+        }
+    }
+
     // Build onComplete callback for an item
-    function buildOnComplete(itemId, mediaSourceId) {
+    function buildOnComplete(itemId, mediaSourceId, playSessionId) {
         const { serverUrl, token } = getServerInfo();
         return {
             url: `${serverUrl}/Sessions/Playing/Stopped`,
@@ -408,6 +423,24 @@
                 ItemId: itemId,
                 MediaSourceId: mediaSourceId || itemId,
                 PositionTicks: '${positionTicks}',
+                PlaySessionId: playSessionId,
+            },
+        };
+    }
+
+    // Build onProgress callback for periodic progress updates
+    function buildOnProgress(itemId, mediaSourceId, playSessionId) {
+        const { serverUrl, token } = getServerInfo();
+        return {
+            url: `${serverUrl}/Sessions/Playing/Progress`,
+            method: 'POST',
+            headers: { 'X-Emby-Token': token },
+            bodyTemplate: {
+                ItemId: itemId,
+                MediaSourceId: mediaSourceId || itemId,
+                PositionTicks: '${positionTicks}',
+                IsPaused: '${isPaused}',
+                PlaySessionId: playSessionId,
             },
         };
     }
@@ -443,11 +476,20 @@
         showModal(`Loading playlist (${items.length} items)...`);
 
         try {
-            const playlistItems = items.map(item => ({
-                url: buildStreamUrl(item.Id, item.MediaSources?.[0]?.Id),
-                itemId: item.Id,
-                onComplete: buildOnComplete(item.Id, item.MediaSources?.[0]?.Id),
-            }));
+            // Generate unique playSessionId for each item - must be same for stream URL and callbacks
+            const playlistItems = items.map((item, index) => {
+                const playSessionId = `launchtube-${Date.now()}-${index}`;
+                return {
+                    url: buildStreamUrl(item.Id, item.MediaSources?.[0]?.Id, playSessionId),
+                    itemId: item.Id,
+                    onComplete: buildOnComplete(item.Id, item.MediaSources?.[0]?.Id, playSessionId),
+                    playSessionId: playSessionId,
+                };
+            });
+
+            // Report playback start for the first item
+            const firstItem = playlistItems[0];
+            await reportPlaybackStart(items[0].Id, items[0].MediaSources?.[0]?.Id, firstItem.playSessionId);
 
             const startPosition = startPositionTicks / 10000000;
 
@@ -494,17 +536,22 @@
             // Video types - play single item
             if (VIDEO_TYPES.includes(item.Type)) {
                 const mediaSourceId = item.MediaSources?.[0]?.Id;
-                const streamUrl = buildStreamUrl(itemId, mediaSourceId);
+                const playSessionId = `launchtube-${Date.now()}`;
+                const streamUrl = buildStreamUrl(itemId, mediaSourceId, playSessionId);
                 const title = item.Name || 'Emby Video';
                 const startPosition = startPositionTicks / 10000000;
-                const onComplete = buildOnComplete(itemId, item.MediaSources?.[0]?.Id);
+                const onComplete = buildOnComplete(itemId, mediaSourceId, playSessionId);
+                const onProgress = buildOnProgress(itemId, mediaSourceId, playSessionId);
+
+                // Report playback start to Emby to create the session
+                await reportPlaybackStart(itemId, mediaSourceId, playSessionId);
 
                 serverLog(`Playing single item: url=${streamUrl}, title=${title}, startPosition=${startPosition}`);
 
                 const response = await fetch(`${LAUNCH_TUBE_URL}/api/1/player/play`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ url: streamUrl, title, startPosition, onComplete }),
+                    body: JSON.stringify({ url: streamUrl, title, startPosition, onComplete, onProgress }),
                 });
 
                 if (!response.ok) throw new Error(`Player API error: ${response.status}`);
@@ -584,7 +631,7 @@
             '.itemAction[data-action="play"]'
         ];
 
-        document.addEventListener('click', function(event) {
+        document.addEventListener('click', async function(event) {
             const target = event.target.closest(playSelectors.join(','));
             if (target) {
                 const itemId = extractItemId(target);
@@ -594,8 +641,16 @@
                     event.preventDefault();
                     event.stopPropagation();
                     event.stopImmediatePropagation();
-                    // Start external playback directly
-                    playExternal(itemId, 0);
+                    // Get item details to check for resume position
+                    try {
+                        const item = await getItemDetails(itemId);
+                        const startPositionTicks = item.UserData?.PlaybackPositionTicks || 0;
+                        serverLog(`Resume position: ${startPositionTicks}`);
+                        await playExternal(itemId, startPositionTicks);
+                    } catch (err) {
+                        serverLog(`Failed to get item details, starting from beginning: ${err}`);
+                        playExternal(itemId, 0);
+                    }
                 }
             }
         }, true);

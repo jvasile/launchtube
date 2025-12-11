@@ -595,12 +595,14 @@ class LaunchTubeServer {
         final title = data['title'] as String?;
         final startPosition = (data['startPosition'] as num?)?.toDouble() ?? 0;
         final onComplete = data['onComplete'] as Map<String, dynamic>?;
+        final onProgress = data['onProgress'] as Map<String, dynamic>?;
 
         await player.play(
           url: url,
           title: title,
           startPosition: startPosition,
           onComplete: onComplete,
+          onProgress: onProgress,
         );
 
         request.response

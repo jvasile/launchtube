@@ -18,6 +18,8 @@ class ExternalPlayer {
   double _duration = 0;
   bool _paused = false;
   Map<String, dynamic>? _onComplete;
+  Map<String, dynamic>? _onProgress;
+  int _lastProgressReport = 0; // Track last progress report time
 
   // Playlist support
   List<PlaylistItem> _playlist = [];
@@ -43,11 +45,14 @@ class ExternalPlayer {
     String? title,
     double startPosition = 0,
     Map<String, dynamic>? onComplete,
+    Map<String, dynamic>? onProgress,
   }) async {
     // Stop any existing playback
     await stop();
 
     _onComplete = onComplete;
+    _onProgress = onProgress;
+    _lastProgressReport = 0;
     _position = startPosition;
     _duration = 0;
     _paused = false;
@@ -94,14 +99,17 @@ class ExternalPlayer {
 
     // Wait for mpv to exit in background
     _process!.exitCode.then((_) async {
-      print('ExternalPlayer: mpv exited, position=$_position');
+      Log.write('ExternalPlayer: mpv exited, position=$_position');
 
-      // Get final position before cleanup
+      // Get final position before cleanup (may fail if mpv already closed pipe)
       await _queryPosition();
+      Log.write('ExternalPlayer: After final query, position=$_position');
 
       // Execute onComplete callback
       if (_onComplete != null) {
         await _executeCallback();
+      } else {
+        Log.write('ExternalPlayer: No onComplete callback registered');
       }
 
       _process = null;
@@ -203,8 +211,71 @@ class ExternalPlayer {
       if (_process == null) return false;
 
       await _queryPosition();
+
+      // Send progress update every 3 seconds
+      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      if (_onProgress != null && now - _lastProgressReport >= 3) {
+        _lastProgressReport = now;
+        _executeProgressCallback();
+      }
+
       return _process != null;
     });
+  }
+
+  Future<void> _executeProgressCallback() async {
+    if (_onProgress == null) return;
+
+    try {
+      final callbackUrl = _onProgress!['url'] as String?;
+      final method = (_onProgress!['method'] as String?) ?? 'POST';
+      final headers = Map<String, String>.from(_onProgress!['headers'] ?? {});
+      final bodyTemplate = _onProgress!['bodyTemplate'];
+
+      if (callbackUrl == null) return;
+
+      // Process body template - replace placeholders with actual values
+      // Note: We need to handle both quoted and unquoted placeholders
+      // to ensure numbers and booleans are sent as proper JSON types
+      String? body;
+      if (bodyTemplate != null) {
+        final positionTicks = (_position * 10000000).round();
+        var bodyStr = jsonEncode(bodyTemplate);
+        // Replace quoted placeholders first (to convert strings to proper types)
+        bodyStr = bodyStr.replaceAll(r'"${positionTicks}"', positionTicks.toString());
+        bodyStr = bodyStr.replaceAll(r'"${isPaused}"', _paused.toString());
+        // Then replace any unquoted placeholders
+        bodyStr = bodyStr.replaceAll(r'${positionTicks}', positionTicks.toString());
+        bodyStr = bodyStr.replaceAll(r'${isPaused}', _paused.toString());
+        body = bodyStr;
+      }
+
+      Log.write('ExternalPlayer: Sending progress update to $callbackUrl, body=$body');
+
+      final client = HttpClient();
+      final request = await client.openUrl(method, Uri.parse(callbackUrl));
+
+      headers.forEach((key, value) {
+        request.headers.set(key, value);
+      });
+
+      if (body != null) {
+        request.headers.set('Content-Type', 'application/json');
+        // Set content length to avoid chunked encoding (Emby doesn't handle it)
+        final bodyBytes = utf8.encode(body);
+        request.contentLength = bodyBytes.length;
+        request.add(bodyBytes);
+      }
+
+      final response = await request.close();
+      final responseBody = await response.transform(utf8.decoder).join();
+      if (response.statusCode != 204) {
+        Log.write('ExternalPlayer: Progress response: ${response.statusCode}, body: $responseBody');
+      }
+      client.close();
+    } catch (e) {
+      Log.write('ExternalPlayer: Progress callback failed: $e');
+    }
   }
 
   Future<void> _queryPosition() async {
@@ -358,12 +429,16 @@ for (\$i = 0; \$i -lt 4; \$i++) {
         final positionTicks = (_position * 10000000).round();
         var bodyStr = jsonEncode(bodyTemplate);
         bodyStr = bodyStr.replaceAll(r'${position}', _position.toStringAsFixed(1));
+        // Replace both quoted string version and unquoted placeholder
+        // This ensures PositionTicks is sent as a number, not a string
+        bodyStr = bodyStr.replaceAll(r'"${positionTicks}"', positionTicks.toString());
         bodyStr = bodyStr.replaceAll(r'${positionTicks}', positionTicks.toString());
         body = bodyStr;
       }
 
-      debugPrint('ExternalPlayer: Executing callback to $callbackUrl');
-      debugPrint('ExternalPlayer: Body: $body');
+      Log.write('ExternalPlayer: Executing callback to $callbackUrl');
+      Log.write('ExternalPlayer: Position=${_position}s, Body=$body');
+      Log.write('ExternalPlayer: Headers=$headers');
 
       final client = HttpClient();
       final request = await client.openUrl(method, Uri.parse(callbackUrl));
@@ -373,15 +448,19 @@ for (\$i = 0; \$i -lt 4; \$i++) {
       });
 
       if (body != null) {
-        request.headers.contentType = ContentType.json;
-        request.write(body);
+        request.headers.set('Content-Type', 'application/json');
+        // Set content length to avoid chunked encoding (Emby doesn't handle it)
+        final bodyBytes = utf8.encode(body);
+        request.contentLength = bodyBytes.length;
+        request.add(bodyBytes);
       }
 
       final response = await request.close();
-      debugPrint('ExternalPlayer: Callback response: ${response.statusCode}');
+      final responseBody = await response.transform(utf8.decoder).join();
+      Log.write('ExternalPlayer: Callback response: ${response.statusCode}, body: $responseBody');
       client.close();
     } catch (e) {
-      debugPrint('ExternalPlayer: Callback failed: $e');
+      Log.write('ExternalPlayer: Callback failed: $e');
     }
   }
 

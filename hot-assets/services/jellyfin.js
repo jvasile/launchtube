@@ -372,6 +372,7 @@
     // Build onComplete callback for an item
     function buildOnComplete(itemId, mediaSourceId) {
         const { serverUrl, token } = getServerInfo();
+        const playSessionId = `launchtube-${Date.now()}`;
         return {
             url: `${serverUrl}/Sessions/Playing/Stopped`,
             method: 'POST',
@@ -380,6 +381,7 @@
                 ItemId: itemId,
                 MediaSourceId: mediaSourceId || itemId,
                 PositionTicks: '${positionTicks}',
+                PlaySessionId: playSessionId,
             },
         };
     }
@@ -555,7 +557,7 @@
             '.itemAction[data-action="play"]'
         ];
 
-        document.addEventListener('click', function(event) {
+        document.addEventListener('click', async function(event) {
             const target = event.target.closest(playSelectors.join(','));
             if (target) {
                 const itemId = extractItemId(target);
@@ -565,8 +567,16 @@
                     event.preventDefault();
                     event.stopPropagation();
                     event.stopImmediatePropagation();
-                    // Start external playback directly
-                    playExternal(itemId, 0);
+                    // Get item details to check for resume position
+                    try {
+                        const item = await getItemDetails(itemId);
+                        const startPositionTicks = item.UserData?.PlaybackPositionTicks || 0;
+                        console.log('Launch Tube: Resume position:', startPositionTicks);
+                        await playExternal(itemId, startPositionTicks);
+                    } catch (err) {
+                        console.error('Launch Tube: Failed to get item details, starting from beginning:', err);
+                        playExternal(itemId, 0);
+                    }
                 }
             }
         }, true);

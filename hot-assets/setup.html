@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>LaunchTube Setup</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #fff;
+            margin: 0;
+            padding: 40px;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 0.5em;
+        }
+        .step {
+            background: rgba(255,255,255,0.1);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 20px 0;
+        }
+        .step h2 {
+            margin-top: 0;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .step-number {
+            background: #4a90d9;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+        }
+        .step.complete .step-number {
+            background: #4caf50;
+        }
+        .step.complete .step-number::after {
+            content: "✓";
+        }
+        .step.complete .step-number span {
+            display: none;
+        }
+        .status {
+            padding: 12px;
+            border-radius: 8px;
+            margin: 12px 0;
+        }
+        .status.checking { background: rgba(255,193,7,0.2); }
+        .status.success { background: rgba(76,175,80,0.2); }
+        .status.error { background: rgba(244,67,54,0.2); }
+        .btn {
+            display: inline-block;
+            padding: 12px 24px;
+            background: #4a90d9;
+            color: #fff;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: bold;
+            margin: 8px 8px 8px 0;
+        }
+        .btn:hover { background: #357abd; }
+        .btn.secondary {
+            background: rgba(255,255,255,0.2);
+        }
+        .hidden { display: none; }
+        #redirect-info {
+            margin-top: 40px;
+            text-align: center;
+            font-size: 1.2em;
+        }
+        #countdown {
+            font-size: 2em;
+            font-weight: bold;
+            color: #4caf50;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>LaunchTube Setup</h1>
+
+        <div class="step" id="step1">
+            <h2><div class="step-number"><span>1</span></div> Userscript Manager</h2>
+            <p>A userscript manager extension is required to inject LaunchTube into streaming sites.</p>
+            <div class="status checking" id="step1-status">Checking...</div>
+            <div id="step1-install" class="hidden"></div>
+        </div>
+
+        <div class="step" id="step2">
+            <h2><div class="step-number"><span>2</span></div> LaunchTube Loader Script</h2>
+            <p>This userscript connects streaming sites to LaunchTube.</p>
+            <div class="status checking" id="step2-status">Waiting for step 1...</div>
+            <div id="step2-install" class="hidden"></div>
+        </div>
+
+        <div id="redirect-info" class="hidden">
+            <p>Setup complete! Redirecting in <span id="countdown">3</span>...</p>
+        </div>
+    </div>
+
+    <script>
+        const targetUrl = new URLSearchParams(location.search).get('target') || '/';
+        let setupComplete = false;
+        let step1Complete = false;
+
+        // Mark everything complete and redirect
+        function markAllComplete() {
+            if (setupComplete) return;
+            setupComplete = true;
+
+            document.getElementById('step1').classList.add('complete');
+            document.getElementById('step1-status').className = 'status success';
+            document.getElementById('step1-status').textContent = 'Userscript manager installed!';
+            document.getElementById('step1-install').classList.add('hidden');
+
+            document.getElementById('step2').classList.add('complete');
+            document.getElementById('step2-status').className = 'status success';
+            document.getElementById('step2-status').textContent = 'Loader script is installed and working!';
+            document.getElementById('step2-install').classList.add('hidden');
+
+            startRedirect();
+        }
+
+        // Install userscript manager and poll for detection
+        async function installUserscriptManager() {
+            document.getElementById('step1-status').className = 'status checking';
+            document.getElementById('step1-status').textContent = 'Opening extension store...';
+
+            // Detect browser and open appropriate extension store
+            const isFirefox = navigator.userAgent.toLowerCase().includes('firefox');
+            const storeUrl = isFirefox
+                ? 'https://addons.mozilla.org/firefox/addon/tampermonkey/'
+                : 'https://chrome.google.com/webstore/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo';
+
+            window.open(storeUrl, '_blank', 'width=800,height=600');
+
+            document.getElementById('step1-status').textContent = 'Install Tampermonkey from the popup, then wait...';
+            document.getElementById('step1-install').innerHTML = '<p style="opacity: 0.7;">Checking for installation...</p>';
+            document.getElementById('step1-install').classList.remove('hidden');
+
+            // Poll for extension detection
+            const pollInterval = setInterval(async () => {
+                const manager = await detectUserscriptManager();
+                if (manager) {
+                    clearInterval(pollInterval);
+                    console.log('LaunchTube: Userscript manager now detected: ' + manager);
+
+                    // Mark step 1 complete
+                    document.getElementById('step1').classList.add('complete');
+                    document.getElementById('step1-status').className = 'status success';
+                    document.getElementById('step1-status').textContent = manager + ' detected!';
+                    document.getElementById('step1-install').classList.add('hidden');
+
+                    // Proceed to step 2: install loader and go to target
+                    document.getElementById('step2-status').className = 'status checking';
+                    document.getElementById('step2-status').textContent = 'Installing loader script...';
+
+                    window.open('/launchtube-loader.user.js', '_blank', 'width=800,height=600');
+                    setTimeout(() => {
+                        // Open target in this window - makes window.close() work later
+                    window.open(targetUrl, '_self');
+                    }, 500);
+                }
+            }, 2000);
+        }
+
+        // Start countdown and redirect
+        function startRedirect() {
+            const info = document.getElementById('redirect-info');
+            const countdown = document.getElementById('countdown');
+            info.classList.remove('hidden');
+
+            let seconds = 3;
+            countdown.textContent = seconds;
+            const timer = setInterval(() => {
+                seconds--;
+                countdown.textContent = seconds;
+                if (seconds <= 0) {
+                    clearInterval(timer);
+                    // Open target in this window - makes window.close() work later
+                    window.open(targetUrl, '_self');
+                }
+            }, 1000);
+        }
+
+        // Listen for loader script to announce itself (means BOTH are working)
+        window.addEventListener('message', (e) => {
+            if (e.data && e.data.type === 'launchtube-loader-ready') {
+                console.log('LaunchTube: Loader detected via postMessage');
+                markAllComplete();
+            }
+        });
+
+        // Ask the server to detect userscript managers via CDP
+        async function detectUserscriptManager() {
+            try {
+                const response = await fetch('/api/1/detect-extensions');
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log('LaunchTube: Server detection result:', data);
+                    if (data.hasUserscriptManager && data.detected.length > 0) {
+                        return data.detected[0]; // Return first detected manager
+                    }
+                }
+            } catch (e) {
+                console.log('LaunchTube: Server detection failed:', e);
+            }
+            return null;
+        }
+
+        // Main detection flow
+        async function runDetection() {
+            // First check if loader is already working (both installed)
+            await new Promise(r => setTimeout(r, 2000));
+            if (setupComplete) return;
+
+            // Try to detect userscript manager
+            const manager = await detectUserscriptManager();
+            if (manager) {
+                console.log('LaunchTube: Userscript manager detected: ' + manager + ', auto-installing loader');
+                // Mark step 1 complete
+                step1Complete = true;
+                document.getElementById('step1').classList.add('complete');
+                document.getElementById('step1-status').className = 'status success';
+                document.getElementById('step1-status').textContent = manager + ' detected!';
+                document.getElementById('step1-install').classList.add('hidden');
+
+                // Auto-trigger loader installation
+                document.getElementById('step2-status').className = 'status checking';
+                document.getElementById('step2-status').textContent = 'Installing loader script...';
+
+                // Try to open userscript - may be blocked as popup
+                const popup = window.open('/launchtube-loader.user.js', '_blank');
+
+                if (!popup || popup.closed) {
+                    // Popup was blocked - show manual link
+                    document.getElementById('step2-status').textContent = 'Click below to install the loader script:';
+                    document.getElementById('step2-install').innerHTML = `
+                        <p><a class="btn" href="/launchtube-loader.user.js" target="_blank">Install Loader Script</a></p>
+                        <p style="margin-top: 16px;"><button class="btn secondary" onclick="location.reload()" style="border: none; cursor: pointer;">Done - Check Again</button></p>
+                    `;
+                    document.getElementById('step2-install').classList.remove('hidden');
+                    return;
+                }
+
+                // Wait for loader to confirm it's working
+                setTimeout(() => {
+                    if (!setupComplete) {
+                        // Loader didn't respond - userscripts may need to be enabled
+                        document.getElementById('step2-status').className = 'status error';
+                        document.getElementById('step2-status').textContent = 'Userscripts may be disabled in your browser.';
+                        document.getElementById('step2-install').innerHTML = `
+                            <p>Chrome requires "Developer mode" to be enabled for userscripts to run.</p>
+                            <p><a class="btn" href="https://www.tampermonkey.net/faq.php#Q209" target="_blank">View Instructions</a></p>
+                            <p style="margin-top: 16px;"><button class="btn secondary" onclick="location.reload()" style="border: none; cursor: pointer;">Try Again</button></p>
+                        `;
+                        document.getElementById('step2-install').classList.remove('hidden');
+                    }
+                }, 8000);
+            } else {
+                console.log('LaunchTube: No userscript manager detected, auto-installing');
+                installUserscriptManager();
+            }
+        }
+
+        runDetection();
+    </script>
+</body>
+</html>

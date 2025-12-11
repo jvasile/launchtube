@@ -66,24 +66,24 @@ final List<AppConfig> defaultApps = [];
 class BrowserInfo {
   final String name;
   final String executable;
-  final String kioskFlag;
+  final String fullscreenFlag;
 
   const BrowserInfo({
     required this.name,
     required this.executable,
-    required this.kioskFlag,
+    required this.fullscreenFlag,
   });
 
   static const List<BrowserInfo> _knownBrowsers = [
-    BrowserInfo(name: 'Firefox', executable: 'firefox', kioskFlag: '--kiosk'),
-    BrowserInfo(name: 'Firefox', executable: 'firefox.exe', kioskFlag: '--kiosk'),
-    BrowserInfo(name: 'Chrome', executable: 'google-chrome', kioskFlag: '--kiosk'),
-    BrowserInfo(name: 'Chrome', executable: 'google-chrome-stable', kioskFlag: '--kiosk'),
-    BrowserInfo(name: 'Chrome', executable: 'chrome', kioskFlag: '--kiosk'),
-    BrowserInfo(name: 'Chrome', executable: 'chrome.exe', kioskFlag: '--kiosk'),
-    BrowserInfo(name: 'Chromium', executable: 'chromium', kioskFlag: '--kiosk'),
-    BrowserInfo(name: 'Chromium', executable: 'chromium-browser', kioskFlag: '--kiosk'),
-    BrowserInfo(name: 'Chromium', executable: 'chromium.exe', kioskFlag: '--kiosk'),
+    BrowserInfo(name: 'Firefox', executable: 'firefox', fullscreenFlag: '--kiosk'),
+    BrowserInfo(name: 'Firefox', executable: 'firefox.exe', fullscreenFlag: '--kiosk'),
+    BrowserInfo(name: 'Chrome', executable: 'google-chrome', fullscreenFlag: '--start-fullscreen'),
+    BrowserInfo(name: 'Chrome', executable: 'google-chrome-stable', fullscreenFlag: '--start-fullscreen'),
+    BrowserInfo(name: 'Chrome', executable: 'chrome', fullscreenFlag: '--start-fullscreen'),
+    BrowserInfo(name: 'Chrome', executable: 'chrome.exe', fullscreenFlag: '--start-fullscreen'),
+    BrowserInfo(name: 'Chromium', executable: 'chromium', fullscreenFlag: '--start-fullscreen'),
+    BrowserInfo(name: 'Chromium', executable: 'chromium-browser', fullscreenFlag: '--start-fullscreen'),
+    BrowserInfo(name: 'Chromium', executable: 'chromium.exe', fullscreenFlag: '--start-fullscreen'),
   ];
 
   static Future<List<BrowserInfo>> detectBrowsers() async {

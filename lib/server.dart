@@ -77,9 +77,12 @@ class LaunchTubeServer {
           'build': buildDate,
         }))
         ..close();
-    } else if (request.uri.path == '/launchtube-loader.user.js') {
+    } else if (request.uri.path == '/launchtube-loader.user.js' || request.uri.path == '/api/1/userscript') {
       // Serve userscript for Tampermonkey installation
       await _serveUserscript(request);
+    } else if (request.uri.path == '/setup') {
+      // Serve setup page that checks for userscript manager
+      await _serveSetupPage(request);
     } else if (request.uri.path == '/install') {
       // Serve install page that auto-closes
       await _serveInstallPage(request);
@@ -116,6 +119,9 @@ class LaunchTubeServer {
           '/api/1/player/status',
           '/api/1/player/stop',
           '/api/1/browser/close',
+          '/api/1/detect-extensions',
+          '/api/1/userscript',
+          '/setup',
           '/install',
           '/launchtube-loader.user.js',
         ],
@@ -124,9 +130,11 @@ class LaunchTubeServer {
         ..headers.contentType = ContentType.json
         ..write(status)
         ..close();
+    } else if (request.uri.path == '/api/1/detect-extensions') {
+      await _handleDetectExtensions(request);
     } else if (request.uri.path == '/api/1/match') {
       await _handleMatchRequest(request);
-    } else if (request.uri.path.startsWith('/api/1/player/')) {
+    } else if (request.uri.path.startsWith('/api/1/player/') || request.uri.path == '/api/1/browser/close') {
       await _handlePlayerRequest(request);
     } else if (request.uri.path.startsWith('/api/1/kv/')) {
       await _handleKvRequest(request);
@@ -363,6 +371,93 @@ class LaunchTubeServer {
 </body>
 </html>
 ''';
+    request.response
+      ..headers.contentType = ContentType.html
+      ..write(html)
+      ..close();
+  }
+
+  Future<void> _handleDetectExtensions(HttpRequest request) async {
+    const debugPort = 9222;
+    final detected = <String>[];
+
+    try {
+      // Connect to Chrome DevTools Protocol to get list of targets
+      final client = HttpClient();
+      client.connectionTimeout = const Duration(seconds: 2);
+
+      final req = await client.getUrl(Uri.parse('http://localhost:$debugPort/json/list'));
+      final response = await req.close();
+
+      if (response.statusCode == 200) {
+        final body = await response.transform(utf8.decoder).join();
+        final targets = jsonDecode(body) as List<dynamic>;
+
+        // Known userscript manager extension IDs and names
+        final knownExtensions = {
+          // Tampermonkey
+          'dhdgffkkebhmkfjojejmpbldmpobfkfo': 'Tampermonkey',
+          'iikmkjmpaadaobahmlepeloendndfphd': 'Tampermonkey', // Edge
+          // Violentmonkey
+          'jinjaccalgkegednnccohejagnlnfdag': 'Violentmonkey',
+          // Greasemonkey (Firefox - shows differently)
+          'greasemonkey': 'Greasemonkey',
+        };
+
+        for (final target in targets) {
+          final url = target['url']?.toString() ?? '';
+          final title = target['title']?.toString() ?? '';
+          final type = target['type']?.toString() ?? '';
+
+          // Check for extension background pages (Chrome/Edge)
+          if (type == 'background_page' || url.startsWith('chrome-extension://') || url.startsWith('moz-extension://')) {
+            for (final entry in knownExtensions.entries) {
+              if (url.contains(entry.key) || title.toLowerCase().contains(entry.key.toLowerCase())) {
+                if (!detected.contains(entry.value)) {
+                  detected.add(entry.value);
+                }
+              }
+            }
+            // Also check title for extension names
+            final lowerTitle = title.toLowerCase();
+            if (lowerTitle.contains('tampermonkey') && !detected.contains('Tampermonkey')) {
+              detected.add('Tampermonkey');
+            } else if (lowerTitle.contains('violentmonkey') && !detected.contains('Violentmonkey')) {
+              detected.add('Violentmonkey');
+            } else if (lowerTitle.contains('greasemonkey') && !detected.contains('Greasemonkey')) {
+              detected.add('Greasemonkey');
+            }
+          }
+        }
+      }
+      client.close();
+    } catch (e) {
+      Log.write('Extension detection failed: $e');
+    }
+
+    request.response
+      ..headers.contentType = ContentType.json
+      ..write(jsonEncode({
+        'detected': detected,
+        'hasUserscriptManager': detected.isNotEmpty,
+      }))
+      ..close();
+  }
+
+  Future<void> _serveSetupPage(HttpRequest request) async {
+    final dataDir = getAssetDirectory();
+    final htmlPath = '$dataDir/setup.html';
+    final cache = FileCache.getInstance();
+
+    final html = await cache.getString(htmlPath);
+    if (html == null) {
+      request.response
+        ..statusCode = HttpStatus.notFound
+        ..write('Setup page not found')
+        ..close();
+      return;
+    }
+
     request.response
       ..headers.contentType = ContentType.html
       ..write(html)

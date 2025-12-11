@@ -283,9 +283,16 @@ class _LauncherHomeState extends State<LauncherHome> {
         // Build args - simple, no profile hacks
         final args = <String>[];
         if (app.kioskMode) {
-          args.add(selectedBrowser.kioskFlag);
+          args.add(selectedBrowser.fullscreenFlag);
         }
-        args.add(app.url!);
+
+        // Add remote debugging port for server-side extension detection
+        const debugPort = 9222;
+        args.add('--remote-debugging-port=$debugPort');
+
+        // Start with setup page that checks for userscript manager, then redirects to target
+        final setupUrl = 'http://localhost:${_server.port}/setup?target=${Uri.encodeComponent(app.url!)}';
+        args.add(setupUrl);
 
         Log.write('Launching browser: ${selectedBrowser.executable} ${args.join(' ')}');
         _launchedBrowser = selectedBrowser;

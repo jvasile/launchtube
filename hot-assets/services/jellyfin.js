@@ -274,22 +274,7 @@
         const exitBtn = confirmationElement.querySelector('.btn-exit');
 
         cancelBtn.addEventListener('click', hideExitConfirmation);
-        exitBtn.addEventListener('click', () => {
-            console.log('[LaunchTube] Exit button clicked');
-            hideModal(true);
-            hideExitConfirmation();
-            console.log('[LaunchTube] Calling browser/close API at', LAUNCH_TUBE_URL);
-            fetch(`${LAUNCH_TUBE_URL}/api/1/browser/close`, { method: 'POST' })
-                .then(r => {
-                    console.log('[LaunchTube] browser/close response:', r.status);
-                    return r.text();
-                })
-                .then(t => console.log('[LaunchTube] browser/close body:', t))
-                .catch(e => {
-                    console.log('[LaunchTube] browser/close error:', e);
-                    window.close();
-                });
-        });
+        exitBtn.addEventListener('click', doExit);
 
         // Also handle keyboard in confirmation dialog
         document.addEventListener('keydown', handleConfirmKeydown, true);
@@ -304,18 +289,25 @@
     }
 
     function handleConfirmKeydown(event) {
-        if (event.key === 'Escape') {
+        if (event.key === 'Escape' || event.key === 'Enter') {
+            // Both Escape and Enter confirm exit
             event.preventDefault();
             event.stopPropagation();
-            hideExitConfirmation();
-        } else if (event.key === 'Enter') {
-            event.preventDefault();
-            event.stopPropagation();
-            hideModal(true);
-            hideExitConfirmation();
-            fetch(`${LAUNCH_TUBE_URL}/api/1/browser/close`, { method: 'POST' })
-                .catch(() => window.close()); // Fallback to window.close
+            doExit();
         }
+    }
+
+    function doExit() {
+        console.log('[LaunchTube] doExit called');
+        hideExitConfirmation();
+        // Call server API to close the browser - window.close() doesn't work due to browser security
+        fetch(`${LAUNCH_TUBE_URL}/api/1/browser/close`, { method: 'POST' })
+            .then(r => {
+                console.log('[LaunchTube] Browser close response:', r.status);
+            })
+            .catch(e => {
+                console.error('[LaunchTube] Browser close failed:', e);
+            });
     }
 
     function startStatusPolling() {

@@ -11,6 +11,7 @@ class ExternalPlayer {
   Process? _process;
   Socket? _ipcSocket;
   String _ipcPath = '/tmp/launchtube-mpv.sock';
+  String _ipcPipeName = 'launchtube-mpv';  // Windows named pipe name
   String _mpvPath = 'mpv'; // configurable mpv executable
 
   double _position = 0;
@@ -51,16 +52,20 @@ class ExternalPlayer {
     _duration = 0;
     _paused = false;
 
-    // Remove old socket file if exists
-    final socketFile = File(_ipcPath);
-    if (await socketFile.exists()) {
-      await socketFile.delete();
+    // Build mpv arguments with platform-appropriate IPC
+    final ipcArg = await _getIpcArg();
+
+    // Remove old socket file if exists (Linux only)
+    if (!Platform.isWindows && !await _isWSL()) {
+      final socketFile = File(_ipcPath);
+      if (await socketFile.exists()) {
+        await socketFile.delete();
+      }
     }
 
-    // Build mpv arguments
     final args = <String>[
       '--fullscreen',
-      '--input-ipc-server=$_ipcPath',
+      ipcArg,
     ];
 
     if (startPosition > 0) {
@@ -125,16 +130,20 @@ class ExternalPlayer {
     _duration = 0;
     _paused = false;
 
-    // Remove old socket file if exists
-    final socketFile = File(_ipcPath);
-    if (await socketFile.exists()) {
-      await socketFile.delete();
+    // Build mpv arguments with platform-appropriate IPC
+    final ipcArg = await _getIpcArg();
+
+    // Remove old socket file if exists (Linux only)
+    if (!Platform.isWindows && !await _isWSL()) {
+      final socketFile = File(_ipcPath);
+      if (await socketFile.exists()) {
+        await socketFile.delete();
+      }
     }
 
-    // Build mpv arguments
     final args = <String>[
       '--fullscreen',
-      '--input-ipc-server=$_ipcPath',
+      ipcArg,
     ];
 
     if (startPosition > 0) {
@@ -199,6 +208,14 @@ class ExternalPlayer {
   }
 
   Future<void> _queryPosition() async {
+    if (Platform.isWindows || await _isWSL()) {
+      await _queryPositionNamedPipe();
+    } else {
+      await _queryPositionUnixSocket();
+    }
+  }
+
+  Future<void> _queryPositionUnixSocket() async {
     try {
       // Query all properties in one connection using mpv's JSON IPC
       _ipcSocket?.close();
@@ -228,59 +245,99 @@ class ExternalPlayer {
         }
       }
 
-      int? newPlaylistPos;
-
-      // Parse responses
-      for (final line in buffer.toString().split('\n')) {
-        if (line.trim().isEmpty) continue;
-        try {
-          final data = jsonDecode(line);
-          final requestId = data['request_id'];
-          final value = data['data'];
-          if (value != null) {
-            switch (requestId) {
-              case 1:
-                _position = (value as num).toDouble();
-                break;
-              case 2:
-                _duration = (value as num).toDouble();
-                break;
-              case 3:
-                _paused = value as bool;
-                break;
-              case 4:
-                newPlaylistPos = (value as num).toInt();
-                break;
-            }
-          }
-        } catch (_) {
-          // Skip malformed responses
-        }
-      }
-
-      // Handle playlist position change - report progress for previous item
-      if (newPlaylistPos != null && newPlaylistPos != _lastReportedPosition && _playlist.isNotEmpty) {
-        if (_lastReportedPosition >= 0 && _lastReportedPosition < _playlist.length) {
-          // Report completion of previous item (at end of video)
-          final prevItem = _playlist[_lastReportedPosition];
-          if (prevItem.onComplete != null) {
-            _onComplete = prevItem.onComplete;
-            _position = _duration; // Report at end
-            await _executeCallback();
-          }
-        }
-        _playlistPosition = newPlaylistPos;
-        _lastReportedPosition = newPlaylistPos;
-        _position = 0; // Reset position for new item
-      }
+      _parseIpcResponses(buffer.toString());
 
       _ipcSocket?.close();
       _ipcSocket = null;
     } catch (e) {
       // IPC not ready or mpv closed
-      debugPrint('ExternalPlayer: IPC query failed: $e');
+      debugPrint('ExternalPlayer: Unix socket IPC query failed: $e');
       _ipcSocket?.close();
       _ipcSocket = null;
+    }
+  }
+
+  Future<void> _queryPositionNamedPipe() async {
+    try {
+      // Use PowerShell to communicate with Windows named pipe
+      final psScript = '''
+\$pipe = New-Object System.IO.Pipes.NamedPipeClientStream(".", "$_ipcPipeName", [System.IO.Pipes.PipeDirection]::InOut)
+\$pipe.Connect(500)
+\$writer = New-Object System.IO.StreamWriter(\$pipe)
+\$reader = New-Object System.IO.StreamReader(\$pipe)
+\$cmds = @(
+  @{command = @("get_property", "time-pos"); request_id = 1},
+  @{command = @("get_property", "duration"); request_id = 2},
+  @{command = @("get_property", "pause"); request_id = 3},
+  @{command = @("get_property", "playlist-pos"); request_id = 4}
+)
+foreach (\$cmd in \$cmds) {
+  \$writer.WriteLine((\$cmd | ConvertTo-Json -Compress))
+}
+\$writer.Flush()
+\$responses = @()
+for (\$i = 0; \$i -lt 4; \$i++) {
+  \$responses += \$reader.ReadLine()
+}
+\$pipe.Close()
+\$responses -join "`n"
+''';
+
+      final result = await Process.run('powershell.exe', ['-Command', psScript])
+          .timeout(const Duration(seconds: 2));
+
+      if (result.exitCode == 0) {
+        _parseIpcResponses(result.stdout.toString());
+      }
+    } catch (e) {
+      debugPrint('ExternalPlayer: Named pipe IPC query failed: $e');
+    }
+  }
+
+  void _parseIpcResponses(String responseText) {
+    int? newPlaylistPos;
+
+    for (final line in responseText.split('\n')) {
+      if (line.trim().isEmpty) continue;
+      try {
+        final data = jsonDecode(line);
+        final requestId = data['request_id'];
+        final value = data['data'];
+        if (value != null) {
+          switch (requestId) {
+            case 1:
+              _position = (value as num).toDouble();
+              break;
+            case 2:
+              _duration = (value as num).toDouble();
+              break;
+            case 3:
+              _paused = value as bool;
+              break;
+            case 4:
+              newPlaylistPos = (value as num).toInt();
+              break;
+          }
+        }
+      } catch (_) {
+        // Skip malformed responses
+      }
+    }
+
+    // Handle playlist position change - report progress for previous item
+    if (newPlaylistPos != null && newPlaylistPos != _lastReportedPosition && _playlist.isNotEmpty) {
+      if (_lastReportedPosition >= 0 && _lastReportedPosition < _playlist.length) {
+        // Report completion of previous item (at end of video)
+        final prevItem = _playlist[_lastReportedPosition];
+        if (prevItem.onComplete != null) {
+          _onComplete = prevItem.onComplete;
+          _position = _duration; // Report at end
+          _executeCallback();
+        }
+      }
+      _playlistPosition = newPlaylistPos;
+      _lastReportedPosition = newPlaylistPos;
+      _position = 0; // Reset position for new item
     }
   }
 
@@ -332,16 +389,33 @@ class ExternalPlayer {
     Log.write('ExternalPlayer: stop() called, _process=${_process?.pid}');
     if (_process != null) {
       final pid = _process!.pid;
-      Log.write('ExternalPlayer: Killing mpv PID $pid');
+      Log.write('ExternalPlayer: Stopping mpv PID $pid');
 
       if (Platform.isWindows || await _isWSL()) {
-        // Windows or WSL with Windows mpv - use taskkill
-        Log.write('ExternalPlayer: Using taskkill for Windows/WSL');
+        // Windows or WSL - try graceful quit via named pipe first
+        Log.write('ExternalPlayer: Sending quit via named pipe');
         try {
-          final result = await Process.run('taskkill.exe', ['/F', '/IM', 'mpv.exe']);
-          Log.write('ExternalPlayer: taskkill result: ${result.exitCode}');
+          final psScript = '''
+\$pipe = New-Object System.IO.Pipes.NamedPipeClientStream(".", "$_ipcPipeName", [System.IO.Pipes.PipeDirection]::InOut)
+\$pipe.Connect(500)
+\$writer = New-Object System.IO.StreamWriter(\$pipe)
+\$cmd = @{command = @("quit")} | ConvertTo-Json -Compress
+\$writer.WriteLine(\$cmd)
+\$writer.Flush()
+\$pipe.Close()
+''';
+          await Process.run('powershell.exe', ['-Command', psScript])
+              .timeout(const Duration(seconds: 2));
+          Log.write('ExternalPlayer: Quit command sent');
         } catch (e) {
-          Log.write('ExternalPlayer: taskkill failed: $e');
+          // Fall back to taskkill
+          Log.write('ExternalPlayer: Named pipe failed, using taskkill: $e');
+          try {
+            final result = await Process.run('taskkill.exe', ['/F', '/IM', 'mpv.exe']);
+            Log.write('ExternalPlayer: taskkill result: ${result.exitCode}');
+          } catch (e2) {
+            Log.write('ExternalPlayer: taskkill failed: $e2');
+          }
         }
       } else {
         // Native Linux - use SIGTERM
@@ -366,6 +440,16 @@ class ExternalPlayer {
     } catch (_) {}
     _isWSLCached = false;
     return false;
+  }
+
+  Future<String> _getIpcArg() async {
+    if (Platform.isWindows || await _isWSL()) {
+      // Windows named pipe format
+      return '--input-ipc-server=\\\\.\\pipe\\$_ipcPipeName';
+    } else {
+      // Unix socket
+      return '--input-ipc-server=$_ipcPath';
+    }
   }
 
   Map<String, dynamic> getStatus() {

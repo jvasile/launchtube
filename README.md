@@ -63,3 +63,8 @@ X-GNOME-Autostart-enabled=true
 Install greasemonkey or tampermonkey into Firefox/Chrome.
 
 
+# OS
+
+This should work on Linux or Windows or even WSL.  If you're going to run
+launchtube in WSL, it's best to install mpv.exe on the Windows side.  Running
+your media player from the Windows side works much better.

@@ -193,8 +193,10 @@
 
     function handleModalKeydown(event) {
         if (event.key === 'Escape') {
+            console.log('Launch Tube: Escape pressed during playback, stopping player');
             event.preventDefault();
             event.stopPropagation();
+            event.stopImmediatePropagation();
             hideModal(true); // Stop playback
         }
     }

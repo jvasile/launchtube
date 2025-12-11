@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 import 'models.dart';
+import 'services.dart';
 
 // External player (mpv) with IPC for position tracking
 class ExternalPlayer {
@@ -328,37 +329,43 @@ class ExternalPlayer {
   }
 
   Future<void> stop() async {
+    Log.write('ExternalPlayer: stop() called, _process=${_process?.pid}');
     if (_process != null) {
-      // Try graceful quit via IPC (Unix sockets - works on Linux)
-      bool ipcWorked = false;
-      try {
-        final socket = await Socket.connect(
-          InternetAddress(_ipcPath, type: InternetAddressType.unix),
-          0,
-        ).timeout(const Duration(milliseconds: 500));
+      final pid = _process!.pid;
+      Log.write('ExternalPlayer: Killing mpv PID $pid');
 
-        final quitCmd = jsonEncode({'command': ['quit']}) + '\n';
-        socket.write(quitCmd);
-        await socket.flush();
-        socket.close();
-        ipcWorked = true;
-      } catch (_) {
-        // IPC failed (expected on Windows/WSL)
-      }
-
-      // Always try to kill the process as fallback
-      if (!ipcWorked) {
+      if (Platform.isWindows || await _isWSL()) {
+        // Windows or WSL with Windows mpv - use taskkill
+        Log.write('ExternalPlayer: Using taskkill for Windows/WSL');
         try {
-          _process?.kill(ProcessSignal.sigterm);
-        } catch (_) {}
-        try {
-          _process?.kill(ProcessSignal.sigkill);
-        } catch (_) {}
+          final result = await Process.run('taskkill.exe', ['/F', '/IM', 'mpv.exe']);
+          Log.write('ExternalPlayer: taskkill result: ${result.exitCode}');
+        } catch (e) {
+          Log.write('ExternalPlayer: taskkill failed: $e');
+        }
+      } else {
+        // Native Linux - use SIGTERM
+        _process!.kill(ProcessSignal.sigterm);
       }
       _process = null;
     }
     _ipcSocket?.close();
     _ipcSocket = null;
+  }
+
+  static bool? _isWSLCached;
+  Future<bool> _isWSL() async {
+    if (_isWSLCached != null) return _isWSLCached!;
+    try {
+      final versionFile = File('/proc/version');
+      if (await versionFile.exists()) {
+        final content = await versionFile.readAsString();
+        _isWSLCached = content.toLowerCase().contains('microsoft');
+        return _isWSLCached!;
+      }
+    } catch (_) {}
+    _isWSLCached = false;
+    return false;
   }
 
   Map<String, dynamic> getStatus() {

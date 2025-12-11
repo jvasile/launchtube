@@ -539,6 +539,7 @@
     let lastClickedItemId = null;
 
     // Intercept clicks on play buttons
+    // Intercept clicks on play buttons and directly start external playback
     function attachPlayListeners() {
         const playSelectors = [
             '.btnPlay',
@@ -558,13 +559,12 @@
                 const itemId = extractItemId(target);
                 if (itemId) {
                     console.log('Launch Tube: Play button clicked, itemId:', itemId);
-                    lastClickedItemId = itemId;
-                    window.launchTubeLastClickedItemId = itemId;
-                    // Clear after a few seconds in case video.play() doesn't fire
-                    setTimeout(() => {
-                        lastClickedItemId = null;
-                        window.launchTubeLastClickedItemId = null;
-                    }, 5000);
+                    // Prevent Jellyfin from starting its player
+                    event.preventDefault();
+                    event.stopPropagation();
+                    event.stopImmediatePropagation();
+                    // Start external playback directly
+                    playExternal(itemId, 0);
                 }
             }
         }, true);
@@ -595,75 +595,21 @@
             }
         });
 
-        // Inject script to override HTMLVideoElement.prototype.play
+        // Inject script to always block HTMLVideoElement.play - we always use external player
         const script = document.createElement('script');
         script.textContent = `
         (function() {
-            let intercepting = false;
             const originalPlay = HTMLVideoElement.prototype.play;
 
             HTMLVideoElement.prototype.play = function() {
                 const src = this.src || '';
-                console.log('Launch Tube: Video.play() called, src:', src);
-
-                if (intercepting) {
-                    return Promise.reject(new Error('Intercepted by Launch Tube'));
-                }
-
-                // Check if this looks like Jellyfin video playback
-                if (src.includes('blob:') || src.includes('/Videos/')) {
-                    intercepting = true;
-
-                    let itemId = null;
-
-                    // From video src (e.g., /Videos/12345/stream)
-                    const srcMatch = src.match(/\\/Videos\\/([0-9a-f]+)[\\/\\?]/i);
-                    if (srcMatch) itemId = srcMatch[1];
-
-                    // From URL hash
-                    if (!itemId) {
-                        const urlMatch = window.location.hash.match(/(?:id|itemId)=([0-9a-f]+)/i);
-                        if (urlMatch) itemId = urlMatch[1];
-                    }
-
-                    // From image URLs on the page
-                    if (!itemId) {
-                        const img = document.querySelector('img[src*="/Items/"]');
-                        if (img) {
-                            const imgMatch = img.src.match(/\\/Items\\/([0-9a-f]+)\\//i);
-                            if (imgMatch) itemId = imgMatch[1];
-                        }
-                    }
-
-                    // From PlaybackManager state
-                    if (!itemId && window.PlaybackManager) {
-                        try {
-                            const nowPlaying = window.PlaybackManager.currentItem && window.PlaybackManager.currentItem();
-                            if (nowPlaying && nowPlaying.Id) itemId = nowPlaying.Id;
-                        } catch(e) {}
-                    }
-
-                    // From last clicked play button (stored by attachPlayListeners)
-                    if (!itemId && window.launchTubeLastClickedItemId) {
-                        itemId = window.launchTubeLastClickedItemId;
-                    }
-
-                    console.log('Launch Tube: Intercepting playback, itemId:', itemId);
-
-                    window.postMessage({ type: 'launchtube-intercept', itemId: itemId, src: src }, '*');
-
-                    this.pause();
-                    this.src = '';
-
-                    setTimeout(() => { intercepting = false; }, 3000);
-
-                    return Promise.reject(new Error('Intercepted by Launch Tube'));
-                }
-
-                return originalPlay.call(this);
+                console.log('Launch Tube: Blocking video.play(), src:', src);
+                this.pause();
+                this.src = '';
+                return Promise.reject(new Error('Blocked by Launch Tube - use external player'));
             };
 
-            console.log('Launch Tube: Installed video.play() interceptor');
+            console.log('Launch Tube: Installed video.play() blocker');
         })();
         `;
         document.documentElement.appendChild(script);

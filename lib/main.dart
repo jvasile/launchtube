@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/widgets.dart';
 
+import 'screensaver.dart';
 import 'services.dart';
 import 'widgets.dart';
 
@@ -23,5 +24,11 @@ void main(List<String> args) async {
   await initAppSupportDir();
   await Log.init();
   Log.write('Asset directory: ${getAssetDirectory()}');
+
+  // Start screensaver inhibitor (checks mpv and browser for video playback)
+  final screensaverInhibitor = ScreensaverInhibitor.getInstance();
+  screensaverInhibitor.setCdpPort(9222);
+  screensaverInhibitor.start();
+
   runApp(const LaunchTubeApp());
 }

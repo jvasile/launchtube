@@ -212,8 +212,9 @@ class ExternalPlayer {
 
       await _queryPosition();
 
-      // Send progress update every 3 seconds
       final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+
+      // Send progress update every 3 seconds
       if (_onProgress != null && now - _lastProgressReport >= 3) {
         _lastProgressReport = now;
         _executeProgressCallback();

@@ -11,9 +11,9 @@ class ScreensaverInhibitor {
   static ScreensaverInhibitor? _instance;
 
   Timer? _timer;
-  bool _inhibited = false;
   int? _cdpPort;
   bool? _isNativeLinux;
+  int _checkIntervalSeconds = 60; // Default, will be updated from xscreensaver config
 
   static ScreensaverInhibitor getInstance() {
     _instance ??= ScreensaverInhibitor();
@@ -26,11 +26,13 @@ class ScreensaverInhibitor {
   }
 
   // Start the periodic check (call this when app starts)
-  void start() {
+  Future<void> start() async {
     if (_timer != null) return;
 
-    // Check every 60 seconds
-    _timer = Timer.periodic(const Duration(seconds: 60), (_) {
+    // Read xscreensaver timeout and set check interval to half of it
+    await _readXscreensaverTimeout();
+
+    _timer = Timer.periodic(Duration(seconds: _checkIntervalSeconds), (_) {
       _checkAndUpdate();
     });
 
@@ -42,7 +44,33 @@ class ScreensaverInhibitor {
   void stop() {
     _timer?.cancel();
     _timer = null;
-    _restore();
+  }
+
+  // Read timeout from ~/.xscreensaver and set interval to half of it
+  Future<void> _readXscreensaverTimeout() async {
+    try {
+      final home = Platform.environment['HOME'];
+      if (home == null) return;
+
+      final configFile = File('$home/.xscreensaver');
+      if (!await configFile.exists()) return;
+
+      final content = await configFile.readAsString();
+      // Look for line like "timeout: 0:05:00" (hours:minutes:seconds)
+      final match = RegExp(r'timeout:\s*(\d+):(\d+):(\d+)').firstMatch(content);
+      if (match != null) {
+        final hours = int.parse(match.group(1)!);
+        final minutes = int.parse(match.group(2)!);
+        final seconds = int.parse(match.group(3)!);
+        final totalSeconds = hours * 3600 + minutes * 60 + seconds;
+
+        // Set check interval to half the timeout, minimum 30 seconds
+        _checkIntervalSeconds = (totalSeconds ~/ 2).clamp(30, 300);
+        debugPrint('ScreensaverInhibitor: xscreensaver timeout is $totalSeconds seconds, checking every $_checkIntervalSeconds seconds');
+      }
+    } catch (e) {
+      debugPrint('ScreensaverInhibitor: Failed to read xscreensaver config: $e');
+    }
   }
 
   Future<void> _checkAndUpdate() async {
@@ -51,10 +79,8 @@ class ScreensaverInhibitor {
 
     final isPlaying = await _isVideoPlaying();
 
-    if (isPlaying && !_inhibited) {
+    if (isPlaying) {
       await _inhibit();
-    } else if (!isPlaying && _inhibited) {
-      await _restore();
     }
   }
 
@@ -207,22 +233,8 @@ class ScreensaverInhibitor {
   Future<void> _inhibit() async {
     try {
       await Process.run('xscreensaver-command', ['-deactivate']);
-      _inhibited = true;
-      debugPrint('ScreensaverInhibitor: Inhibited xscreensaver');
     } catch (e) {
       debugPrint('ScreensaverInhibitor: Failed to inhibit: $e');
-    }
-  }
-
-  Future<void> _restore() async {
-    if (!_inhibited) return;
-
-    try {
-      await Process.run('xscreensaver-command', ['-activate']);
-      _inhibited = false;
-      debugPrint('ScreensaverInhibitor: Restored xscreensaver');
-    } catch (e) {
-      debugPrint('ScreensaverInhibitor: Failed to restore: $e');
     }
   }
 }

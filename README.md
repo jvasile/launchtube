@@ -13,25 +13,16 @@ autologin-user-timeout=0
 ```
 
 ```
-$ sudo apt install caffeine mpv xscreensaver xscreensaver-gl-extra unclutter
+$ sudo apt install mpv xscreensaver xscreensaver-gl-extra unclutter
 
 # Prevent rfkill warnings on wake from sleep
 sudo usermod -aG netdev guest
 ```
 
-Let's try to do slidehow without xscreensaver.  We'll use glslideshow, which is
-in the xscreensaver-gl package.
-
-```
-$ sudo apt install xscreensaver-gl xss-lock
-```
 
 As guest:
 ```
 $ gsettings set org.gnome.desktop.screensaver lock-enabled false
-
-# Add to ~/.config/mpv/mpv.conf
-stop-screensaver=always
 
 # Auto-start on login - create ~/.config/autostart/xscreensaver.desktop:
   [Desktop Entry]
@@ -39,14 +30,6 @@ stop-screensaver=always
   Name=XScreenSaver
   Exec=xscreensaver -nosplash
   Hidden=false
-
-# Create ~/.config/autostart/caffeine.desktop:
-  [Desktop Entry]
-  Type=Application
-  Name=Caffeine
-  Exec=caffeine-indicator
-  Hidden=false
-  X-GNOME-Autostart-enabled=true
 
 # Create ~/.config/autostart/unclutter.desktop:
 [Desktop Entry]

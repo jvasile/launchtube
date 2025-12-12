@@ -1,5 +1,6 @@
 {
   "name": "Tubi",
   "url": "https://tubi.tv",
+  "matchUrls": ["https://tubitv.com"],
   "color": "#FA382F"
 }

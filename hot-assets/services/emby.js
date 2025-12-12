@@ -204,6 +204,19 @@
         if (event.key === 'Escape' && !modalElement && !confirmationElement) {
             event.preventDefault();
             event.stopPropagation();
+
+            // Check if we're on a detail page - go back instead of exit
+            const isDetailPage = document.querySelector('.detailPageContent, .itemDetailPage, [data-type="Program"]') ||
+                                 window.location.hash.includes('id=');
+            if (isDetailPage) {
+                serverLog('Escape on detail page, going back');
+                if (typeof window.launchtubeIgnoreMouseUntil === 'function') {
+                    window.launchtubeIgnoreMouseUntil(Date.now() + 1000);
+                }
+                history.back();
+                return;
+            }
+
             showExitConfirmation();
         }
     }

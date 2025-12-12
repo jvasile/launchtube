@@ -1,4 +1,4 @@
-// Launch Tube: Pluto TV - Escape to exit
+// Launch Tube: Pluto TV - Escape to exit, G for Guide
 (function() {
     'use strict';
     const LAUNCH_TUBE_PORT = window.LAUNCH_TUBE_PORT || 8765;
@@ -13,7 +13,80 @@
 
     serverLog('Pluto TV script loaded');
 
-    function handleGlobalEscape(event) {
+    // Attach click listener to Guide button when it appears, then click it
+    function attachGuideButtonListener() {
+        const guideBtn = Array.from(document.querySelectorAll('button, [role="button"], a'))
+            .find(el => el.textContent.trim().toLowerCase() === 'guide');
+        if (guideBtn && !guideBtn._launchTubeListener) {
+            guideBtn._launchTubeListener = true;
+            guideBtn.addEventListener('click', () => {
+                serverLog('Guide button clicked');
+                maximizeGuide();
+            });
+            serverLog('Attached listener to Guide button');
+            // Auto-click to go straight to guide
+            guideBtn.click();
+        } else if (!guideBtn) {
+            setTimeout(attachGuideButtonListener, 500);
+        }
+    }
+    attachGuideButtonListener();
+
+    let guideObserver = null;
+
+    function hidePromoElements() {
+        const container = document.querySelector('main [class*="liveTVLayoutContainer"]');
+        if (!container) return false;
+
+        let hiddenAny = false;
+        Array.from(container.children).forEach((child, i) => {
+            if (!child.className || !child.className.includes('liveTVGuideLayoutContainer')) {
+                if (child.style.display !== 'none') {
+                    child.style.cssText = 'display: none !important';
+                    serverLog(`Hidden element [${i}]`);
+                    hiddenAny = true;
+                }
+            }
+        });
+
+        const guide = document.querySelector('[class*="liveTVGuideLayoutContainer"]');
+        if (guide && !guide.style.height) {
+            guide.style.cssText = 'overflow: auto !important; height: calc(100vh - 64px) !important';
+            serverLog('Expanded guide');
+        }
+
+        return hiddenAny;
+    }
+
+    function maximizeGuide() {
+        hidePromoElements();
+
+        // Watch body for any DOM changes and hide promo elements when they appear
+        if (!guideObserver) {
+            guideObserver = new MutationObserver(() => {
+                hidePromoElements();
+            });
+            guideObserver.observe(document.body, { childList: true, subtree: true });
+            serverLog('Started observing body for promo elements');
+        }
+
+        serverLog('Guide maximized');
+    }
+
+    function handleKeydown(event) {
+        // G key - click Guide button and maximize guide view
+        if ((event.key === 'g' || event.key === 'G') && !confirmationElement) {
+            const guideBtn = Array.from(document.querySelectorAll('button, [role="button"], a'))
+                .find(el => el.textContent.trim().toLowerCase() === 'guide');
+            if (guideBtn) {
+                serverLog('Clicking Guide button');
+                guideBtn.click();
+                maximizeGuide();
+            }
+            return;
+        }
+
+        // Escape key - show exit confirmation
         if (event.key === 'Escape' && !confirmationElement) {
             if (document.fullscreenElement) return;
             event.preventDefault();
@@ -92,5 +165,5 @@
         }
     }
 
-    document.addEventListener('keydown', handleGlobalEscape, true);
+    document.addEventListener('keydown', handleKeydown, true);
 })();

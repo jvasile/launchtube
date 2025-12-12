@@ -534,6 +534,10 @@ class _LauncherHomeState extends State<LauncherHome> {
           }
         } else if (event.character == '?') {
           _showHelpDialog();
+        } else if (event.character == '+') {
+          if (!_moveMode) {
+            _showAddDialog();
+          }
         }
       });
     }
@@ -562,6 +566,7 @@ class _LauncherHomeState extends State<LauncherHome> {
             children: [
               _HelpRow(shortcut: 'Arrow Keys', description: 'Navigate'),
               _HelpRow(shortcut: 'Enter', description: 'Launch app'),
+              _HelpRow(shortcut: '+', description: 'Add app'),
               _HelpRow(shortcut: 'C', description: 'Configure app'),
               _HelpRow(shortcut: 'M', description: 'Move app'),
               _HelpRow(shortcut: 'Delete', description: 'Delete app'),

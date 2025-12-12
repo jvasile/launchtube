@@ -204,6 +204,17 @@
         if (event.key === 'Escape' && !modalElement && !confirmationElement) {
             event.preventDefault();
             event.stopPropagation();
+
+            // Check if we're on a detail page - go back instead of exit
+            const isDetailPage = document.querySelector('.detailPageContent, .itemDetailPage, [data-type="Program"]') ||
+                                 window.location.hash.includes('id=');
+            if (isDetailPage) {
+                serverLog('Escape on detail page, going back');
+                ignoreMouseUntil = Date.now() + 1000; // Ignore mouse for 1s after going back
+                history.back();
+                return;
+            }
+
             showExitConfirmation();
         }
     }
@@ -811,16 +822,21 @@
         selectedCard = card;
         if (card) {
             card.classList.add('launchtube-selected');
-            // Scroll with offset to avoid nav bar (check if card is near top)
-            const rect = card.getBoundingClientRect();
-            if (rect.top < 100) {
-                // Card is near top, scroll to center it
-                card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            } else if (rect.bottom > window.innerHeight) {
-                // Card is below viewport
-                card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }
+            ensureCardVisible(card);
             serverLog(`Selected: ${card.querySelector('[class*="cardText"]')?.textContent?.trim()?.substring(0, 30) || 'unknown'}`);
+        }
+    }
+
+    // Ensure card is fully visible on screen
+    function ensureCardVisible(card) {
+        const rect = card.getBoundingClientRect();
+        const navBarHeight = 100; // Approximate nav bar height
+        if (rect.top < navBarHeight) {
+            // Card is cut off at top
+            window.scrollBy({ top: rect.top - navBarHeight - 20, behavior: 'smooth' });
+        } else if (rect.bottom > window.innerHeight) {
+            // Card is cut off at bottom
+            window.scrollBy({ top: rect.bottom - window.innerHeight + 20, behavior: 'smooth' });
         }
     }
 
@@ -967,12 +983,23 @@
 
     document.addEventListener('keydown', handleNavKeydown, true);
 
-    // Follow mouse - select card on hover (but ignore briefly after keyboard nav)
+    // Follow mouse - select card on hover (debounced, and ignore briefly after keyboard nav)
+    let mouseDebounceTimer = null;
     document.addEventListener('mouseover', (event) => {
         if (Date.now() < ignoreMouseUntil) return;
         const card = event.target.closest('.card');
         if (card && card !== selectedCard) {
-            selectCard(card);
+            // Debounce - only select after mouse stops moving for 200ms
+            clearTimeout(mouseDebounceTimer);
+            mouseDebounceTimer = setTimeout(() => {
+                if (Date.now() < ignoreMouseUntil) return;
+                if (selectedCard) {
+                    selectedCard.classList.remove('launchtube-selected');
+                }
+                selectedCard = card;
+                card.classList.add('launchtube-selected');
+                ensureCardVisible(card);
+            }, 200);
         }
     });
 

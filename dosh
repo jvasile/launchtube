@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Do - The Simplest Build Tool on Earth.
+# Documentation and examples see https://github.com/8gears/do
+#
+SCRIPTNAME=`basename "$0"`
+BASEDIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )/..
+cd ${BASEDIR}
+
+wsl() {
+    # Build Windows binary from WSL by syncing to Windows side and building there
+    SRC="/home/james/src/launchtube/"
+    DEST="/mnt/c/Users/jvasi/src/launchtube/"
+    WIN_DEST="/c/Users/jvasi/src/launchtube"
+
+    # Compute build info from WSL side (where git and tools work reliably)
+    VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: //' | sed 's/+.*//')
+    GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")$(git diff --quiet 2>/dev/null || echo "+")
+    BUILD_DATE=$(date -u +"%Y-%m-%d")
+
+    echo "Building Launch Tube for Windows (from WSL)"
+    echo "  Version: $VERSION"
+    echo "  Commit:  $GIT_COMMIT"
+    echo "  Date:    $BUILD_DATE"
+    echo
+
+    mkdir -p "$DEST"
+
+    rsync -av --delete \
+        --exclude='.git/' \
+        --exclude='build/' \
+        --exclude='.dart_tool/' \
+        --exclude='.pub-cache/' \
+        --exclude='.pub/' \
+        --exclude='coverage/' \
+        --exclude='.idea/' \
+        --exclude='.flutter-plugins-dependencies' \
+        "$SRC" "$DEST"
+
+    # Call flutter directly via Windows bash
+    bash.exe -c "export PATH=\"/c/Users/jvasi/scoop/shims:\$PATH\" && cd $WIN_DEST && flutter build windows --dart-define=APP_VERSION=$VERSION --dart-define=GIT_COMMIT=$GIT_COMMIT --dart-define=BUILD_DATE=$BUILD_DATE"
+}
+
+
+
+"$@" # <- execute the task
+[ "$#" -gt 0 ] || printf "Usage:\n\t./${SCRIPTNAME} %s\n" "($(compgen -A function | grep '^[^_]' | paste -sd '|' -))"
+

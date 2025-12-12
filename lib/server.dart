@@ -311,8 +311,8 @@ class LaunchTubeServer {
       return;
     }
 
-    // Derive service ID from name: "Jellyfin" -> "jellyfin"
-    final serviceId = matchedServiceName.toLowerCase().replaceAll(' ', '-');
+    // Derive service ID from name: "Jellyfin" -> "jellyfin", "Disney+" -> "disney"
+    final serviceId = matchedServiceName.toLowerCase().replaceAll(' ', '-').replaceAll('+', '');
     final serviceVersion = request.uri.queryParameters['version'];
     await _serveServiceScript(request, serviceId, version: serviceVersion);
   }

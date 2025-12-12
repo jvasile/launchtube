@@ -45,7 +45,7 @@ instead of Roku apps, you just launch native and web apps.
   * youtube
   * max
   * youtube-music
-  * nasaplus
+  * nasa
 
 ## Custom Javascript
 

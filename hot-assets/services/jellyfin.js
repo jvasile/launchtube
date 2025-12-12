@@ -64,9 +64,17 @@
     // Start bootstrap
     bootstrap();
 
+    // Send log to server for debugging
+    function serverLog(message, level = 'info') {
+        console.log(`[LaunchTube] ${message}`);
+        if (typeof window.launchTubeLog === 'function') {
+            window.launchTubeLog(message, level);
+        }
+    }
+
     // Base implementation
     function initJellyfin() {
-        console.log('Launch Tube: Jellyfin script loaded');
+        serverLog('Jellyfin script loaded');
 
     // Modal state
     let modalElement = null;

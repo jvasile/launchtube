@@ -13,11 +13,9 @@
     // Send log to server for debugging
     function serverLog(message, level = 'info') {
         console.log(`[LaunchTube] ${message}`);
-        fetch(`${LAUNCH_TUBE_URL}/api/1/log`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message, level }),
-        }).catch(() => {}); // Ignore errors
+        if (typeof window.launchTubeLog === 'function') {
+            window.launchTubeLog(message, level);
+        }
     }
 
     // Version detection bootstrap

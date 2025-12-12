@@ -16,12 +16,10 @@
     serverLog('YouTube script loaded');
 
     function handleGlobalEscape(event) {
-        serverLog('keydown: ' + event.key);
         if (event.key === 'Escape' && !confirmationElement) {
             if (document.fullscreenElement) return;
             event.preventDefault();
             event.stopPropagation();
-            serverLog('Showing exit confirmation');
             showExitConfirmation();
         }
     }

@@ -1,5 +1,6 @@
 {
   "name": "Max",
   "url": "https://max.com",
+  "matchUrls": ["https://hbomax.com"],
   "color": "#FFFFFF"
 }

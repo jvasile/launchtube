@@ -154,8 +154,13 @@
 
         // Mark everything complete and redirect
         async function markAllComplete() {
-            // If we have a target and haven't shown UI yet, just redirect silently
-            if (hasTarget && !loaderCheckDone) {
+            // Always check version before redirecting
+            const expectedVersion = await getExpectedLoaderVersion();
+            const needsUpdate = expectedVersion !== null &&
+                (installedLoaderVersion === null || installedLoaderVersion < expectedVersion);
+
+            // If we have a target and loader is current, redirect silently
+            if (hasTarget && !loaderCheckDone && !needsUpdate) {
                 setupComplete = true;
                 window.open(targetUrl, '_self');
                 return;
@@ -168,11 +173,6 @@
             document.getElementById('step1-status').className = 'status success';
             document.getElementById('step1-status').textContent = 'Userscript manager installed!';
             document.getElementById('step1-install').classList.add('hidden');
-
-            // Check if loader needs update
-            const expectedVersion = await getExpectedLoaderVersion();
-            const needsUpdate = expectedVersion !== null &&
-                (installedLoaderVersion === null || installedLoaderVersion < expectedVersion);
 
             if (needsUpdate) {
                 // Loader is outdated - don't set setupComplete so we re-check when new loader announces

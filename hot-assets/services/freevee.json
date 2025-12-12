@@ -1,5 +1,6 @@
 {
   "name": "Freevee",
   "url": "https://amazon.com/freevee",
+  "matchUrls": ["https://amazon.com/gp/video/storefront"],
   "color": "#31135A"
 }

@@ -3,6 +3,8 @@
 A launcher for streaming services and media apps for Linux and Windows (and
 maybe OS X).
 
+In the app, hit ? to see keyboard shortcuts.
+
 ## Features
 
   * Full screen media app launcher 

@@ -532,9 +532,52 @@ class _LauncherHomeState extends State<LauncherHome> {
           if (!_moveMode && _selectedIndex < apps.length) {
             _showDeleteConfirmation(_selectedIndex);
           }
+        } else if (event.character == '?') {
+          _showHelpDialog();
         }
       });
     }
+  }
+
+  void _showHelpDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => KeyboardListener(
+        focusNode: FocusNode()..requestFocus(),
+        autofocus: true,
+        onKeyEvent: (event) {
+          if (event is KeyDownEvent &&
+              (event.logicalKey == LogicalKeyboardKey.escape ||
+               event.logicalKey == LogicalKeyboardKey.enter ||
+               event.character == '?')) {
+            Navigator.of(context).pop();
+          }
+        },
+        child: AlertDialog(
+          backgroundColor: const Color(0xFF2A2A4E),
+          title: const Text('Keyboard Shortcuts', style: TextStyle(color: Colors.white)),
+          content: const Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _HelpRow(shortcut: 'Arrow Keys', description: 'Navigate'),
+              _HelpRow(shortcut: 'Enter', description: 'Launch app'),
+              _HelpRow(shortcut: 'C', description: 'Configure app'),
+              _HelpRow(shortcut: 'M', description: 'Move app'),
+              _HelpRow(shortcut: 'Delete', description: 'Delete app'),
+              _HelpRow(shortcut: 'Escape', description: 'Cancel'),
+              _HelpRow(shortcut: '?', description: 'Show this help'),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _showDeleteConfirmation(int index) {
@@ -2027,6 +2070,38 @@ class _ServiceCard extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _HelpRow extends StatelessWidget {
+  final String shortcut;
+  final String description;
+
+  const _HelpRow({required this.shortcut, required this.description});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 100,
+            child: Text(
+              shortcut,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          Text(
+            description,
+            style: const TextStyle(color: Colors.white70),
+          ),
+        ],
       ),
     );
   }

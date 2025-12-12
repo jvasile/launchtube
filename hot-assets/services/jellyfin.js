@@ -737,6 +737,274 @@
         });
     }
 
+    // Debug: Log card structure when pressing 'i' key
+    function logCardStructure() {
+        serverLog('=== Card Structure Debug ===');
+
+        // Find all cards that are visible (have non-zero size and in viewport)
+        const allCards = document.querySelectorAll('.card');
+        const visibleCards = Array.from(allCards).filter(card => {
+            const rect = card.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0 && rect.top < window.innerHeight && rect.bottom > 0;
+        });
+
+        serverLog(`Found ${allCards.length} total, ${visibleCards.length} visible .card elements`);
+
+        // Log first few visible cards with their titles
+        visibleCards.slice(0, 5).forEach((card, i) => {
+            const rect = card.getBoundingClientRect();
+            const dataId = card.dataset?.id || card.querySelector('[data-id]')?.dataset?.id || 'none';
+            const title = card.querySelector('.cardText, .cardTextCentered, [class*="cardText"]')?.textContent?.trim() || 'no title';
+            serverLog(`Card[${i}]: "${title.substring(0, 30)}" id=${dataId.substring(0, 12)} top=${Math.round(rect.top)} left=${Math.round(rect.left)} w=${Math.round(rect.width)}`);
+        });
+
+        // Find the parent container of visible cards
+        if (visibleCards.length > 0) {
+            const parent = visibleCards[0].parentElement;
+            serverLog(`Parent: ${parent?.tagName} class="${parent?.className?.substring(0, 60)}"`);
+        }
+
+        serverLog('=== End Debug ===');
+    }
+
+    // Debug key handler
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'i' && event.ctrlKey) {
+            event.preventDefault();
+            logCardStructure();
+        }
+    });
+
+    // === Keyboard Navigation ===
+    let selectedCard = null;
+    let pendingEnter = false; // For double-enter detection
+    let ignoreMouseUntil = 0; // Timestamp to ignore mouse events after keyboard nav
+
+    // Add highlight style
+    const navStyle = document.createElement('style');
+    navStyle.textContent = `
+        .launchtube-selected .cardImageContainer {
+            box-shadow: inset 0 0 0 4px #00a4dc !important;
+        }
+        .launchtube-selected {
+            z-index: 9999 !important;
+            position: relative !important;
+        }
+    `;
+    document.head.appendChild(navStyle);
+
+    function getVisibleCards(includeBelow = false) {
+        const allCards = document.querySelectorAll('.card');
+        return Array.from(allCards).filter(card => {
+            const rect = card.getBoundingClientRect();
+            if (rect.width === 0 || rect.height === 0) return false;
+            // Include cards in viewport plus one screen height below for scrolling
+            const maxTop = includeBelow ? window.innerHeight * 2 : window.innerHeight;
+            return rect.top < maxTop && rect.bottom > 0;
+        });
+    }
+
+    function selectCard(card) {
+        if (selectedCard) {
+            selectedCard.classList.remove('launchtube-selected');
+        }
+        selectedCard = card;
+        if (card) {
+            card.classList.add('launchtube-selected');
+            // Scroll with offset to avoid nav bar (check if card is near top)
+            const rect = card.getBoundingClientRect();
+            if (rect.top < 100) {
+                // Card is near top, scroll to center it
+                card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            } else if (rect.bottom > window.innerHeight) {
+                // Card is below viewport
+                card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+            serverLog(`Selected: ${card.querySelector('[class*="cardText"]')?.textContent?.trim()?.substring(0, 30) || 'unknown'}`);
+        }
+    }
+
+    function getCardGrid() {
+        const cards = getVisibleCards(true); // Include cards below viewport for scrolling
+        if (cards.length === 0) return { rows: [], cards: [] };
+
+        // Group cards by row (same top position, with 20px tolerance)
+        const rowMap = new Map();
+        cards.forEach(card => {
+            const rect = card.getBoundingClientRect();
+            const rowKey = Math.round(rect.top / 20) * 20; // Round to nearest 20px
+            if (!rowMap.has(rowKey)) rowMap.set(rowKey, []);
+            rowMap.get(rowKey).push({ card, rect });
+        });
+
+        // Sort rows by top, and cards within each row by left
+        const rows = Array.from(rowMap.entries())
+            .sort((a, b) => a[0] - b[0])
+            .map(([_, rowCards]) => rowCards.sort((a, b) => a.rect.left - b.rect.left).map(c => c.card));
+
+        return { rows, cards };
+    }
+
+    function findCardPosition(card, rows) {
+        for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
+            const colIdx = rows[rowIdx].indexOf(card);
+            if (colIdx !== -1) return { row: rowIdx, col: colIdx };
+        }
+        return null;
+    }
+
+    function navigateCards(direction) {
+        const cards = getVisibleCards(true);
+        if (cards.length === 0) return;
+
+        // If no card selected, select first visible
+        if (!selectedCard || !document.body.contains(selectedCard)) {
+            selectCard(cards[0]);
+            return;
+        }
+
+        const currentRect = selectedCard.getBoundingClientRect();
+        const currentCenterX = currentRect.left + currentRect.width / 2;
+        const currentCenterY = currentRect.top + currentRect.height / 2;
+        const currentTitle = selectedCard.querySelector('[class*="cardText"]')?.textContent?.trim()?.substring(0, 20) || '?';
+
+        serverLog(`Nav ${direction}: from "${currentTitle}" at y=${Math.round(currentCenterY)}`);
+
+        let bestCard = null;
+        let bestDistance = Infinity;
+
+        cards.forEach(card => {
+            if (card === selectedCard) return;
+            const rect = card.getBoundingClientRect();
+            const centerX = rect.left + rect.width / 2;
+            const centerY = rect.top + rect.height / 2;
+
+            let isValidDirection = false;
+            switch (direction) {
+                case 'left':
+                    isValidDirection = centerX < currentCenterX - 10 && Math.abs(centerY - currentCenterY) < rect.height;
+                    break;
+                case 'right':
+                    isValidDirection = centerX > currentCenterX + 10 && Math.abs(centerY - currentCenterY) < rect.height;
+                    break;
+                case 'up':
+                    isValidDirection = centerY < currentCenterY - 10;
+                    break;
+                case 'down':
+                    isValidDirection = centerY > currentCenterY + 10;
+                    break;
+            }
+
+            if (isValidDirection) {
+                // Distance: prioritize vertical for up/down, horizontal for left/right
+                let distance;
+                if (direction === 'up' || direction === 'down') {
+                    distance = Math.abs(centerY - currentCenterY) + Math.abs(centerX - currentCenterX) * 0.1;
+                } else {
+                    distance = Math.abs(centerX - currentCenterX) + Math.abs(centerY - currentCenterY) * 10;
+                }
+
+                if (distance < bestDistance) {
+                    bestDistance = distance;
+                    bestCard = card;
+                }
+            }
+        });
+
+        if (bestCard) {
+            const bestTitle = bestCard.querySelector('[class*="cardText"]')?.textContent?.trim()?.substring(0, 20) || '?';
+            const bestRect = bestCard.getBoundingClientRect();
+            serverLog(`  -> "${bestTitle}" at y=${Math.round(bestRect.top + bestRect.height/2)}`);
+            ignoreMouseUntil = Date.now() + 500; // Ignore mouse for 500ms after keyboard nav
+            selectCard(bestCard);
+        } else {
+            serverLog(`  -> no card found`);
+        }
+    }
+
+    function activateCard() {
+        if (!selectedCard) return;
+
+        // Double-enter detection: if pendingEnter is true, play directly
+        if (pendingEnter) {
+            serverLog('Double-enter detected, playing directly');
+            pendingEnter = false;
+            const itemId = extractItemId(selectedCard);
+            if (itemId) {
+                playExternal(itemId, 0);
+            }
+            return;
+        }
+
+        // First enter: navigate to detail page
+        pendingEnter = true;
+        setTimeout(() => { pendingEnter = false; }, 1500); // Reset after 1.5s
+
+        // Click on the card to navigate
+        const link = selectedCard.querySelector('a') || selectedCard;
+        if (link) {
+            serverLog('Activating card (first enter)');
+            link.click();
+        }
+    }
+
+    // Keyboard navigation handler
+    function handleNavKeydown(event) {
+        // Don't handle if modal is open or in input field
+        if (modalElement || confirmationElement) return;
+        if (event.target.matches('input, textarea, select')) return;
+
+        const key = event.key;
+        if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(key)) {
+            event.preventDefault();
+            const direction = key.replace('Arrow', '').toLowerCase();
+            navigateCards(direction);
+        } else if (key === 'Enter' && selectedCard) {
+            event.preventDefault();
+            activateCard();
+        }
+    }
+
+    document.addEventListener('keydown', handleNavKeydown, true);
+
+    // Follow mouse - select card on hover (but ignore briefly after keyboard nav)
+    document.addEventListener('mouseover', (event) => {
+        if (Date.now() < ignoreMouseUntil) return;
+        const card = event.target.closest('.card');
+        if (card && card !== selectedCard) {
+            selectCard(card);
+        }
+    });
+
+    // Auto-select first card when page loads/changes
+    function autoSelectFirstCard() {
+        const cards = getVisibleCards();
+        if (cards.length > 0 && !selectedCard) {
+            selectCard(cards[0]);
+        }
+    }
+
+    // Watch for page changes and auto-select
+    const pageObserver = new MutationObserver(() => {
+        // Check if we're on a detail page - focus play button
+        const playBtn = document.querySelector('.btnPlay, .btnResume, .detailButton-primary');
+        if (playBtn && !selectedCard) {
+            playBtn.focus();
+            serverLog('Focused play button on detail page');
+            return;
+        }
+
+        // Otherwise auto-select first card if none selected
+        if (!selectedCard || !document.body.contains(selectedCard)) {
+            selectedCard = null;
+            setTimeout(autoSelectFirstCard, 100);
+        }
+    });
+    pageObserver.observe(document.body, { childList: true, subtree: true });
+
+    // Initial auto-select after a delay
+    setTimeout(autoSelectFirstCard, 500);
+
     // Initialize
     function init() {
         console.log('Launch Tube: Initializing Jellyfin integration');
@@ -746,6 +1014,8 @@
         interceptVideoPlayback();
         // Global escape to exit when not playing
         document.addEventListener('keydown', handleGlobalEscape, true);
+
+        serverLog('Press Ctrl+I to log card structure');
     }
 
     if (document.readyState === 'loading') {

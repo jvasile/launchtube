@@ -639,6 +639,7 @@ class _LauncherHomeState extends State<LauncherHome> {
     showDialog(
       context: context,
       builder: (context) => ServicePickerDialog(
+        installedApps: apps,
         onCustom: () {
           Navigator.of(context).pop();
           final random = Random();
@@ -1749,11 +1750,13 @@ class _AppConfigDialogState extends State<AppConfigDialog> {
 class ServicePickerDialog extends StatefulWidget {
   final VoidCallback onCustom;
   final Function(ServiceTemplate) onSelectService;
+  final List<AppConfig> installedApps;
 
   const ServicePickerDialog({
     super.key,
     required this.onCustom,
     required this.onSelectService,
+    required this.installedApps,
   });
 
   @override
@@ -1779,12 +1782,32 @@ class _ServicePickerDialogState extends State<ServicePickerDialog> {
 
   Future<void> _loadServices() async {
     final services = await ServiceLibraryLoader.loadServices();
+    // Filter out services that are already installed with identical settings
+    final filteredServices = services.where((service) {
+      final templateApp = service.toAppConfig();
+      return !widget.installedApps.any((installed) =>
+        installed.name == templateApp.name &&
+        installed.url == templateApp.url &&
+        installed.colorValue == templateApp.colorValue &&
+        _listEquals(installed.matchUrls, templateApp.matchUrls)
+      );
+    }).toList();
     if (mounted) {
       setState(() {
-        _services = services;
+        _services = filteredServices;
         _isLoading = false;
       });
     }
+  }
+
+  bool _listEquals(List<String>? a, List<String>? b) {
+    if (a == null && b == null) return true;
+    if (a == null || b == null) return false;
+    if (a.length != b.length) return false;
+    for (int i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
   }
 
   @override

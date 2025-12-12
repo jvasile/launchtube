@@ -527,9 +527,64 @@ class _LauncherHomeState extends State<LauncherHome> {
               _moveFromIndex = _selectedIndex;
             }
           }
+        } else if (event.logicalKey == LogicalKeyboardKey.delete) {
+          // Delete selected app with confirmation
+          if (!_moveMode && _selectedIndex < apps.length) {
+            _showDeleteConfirmation(_selectedIndex);
+          }
         }
       });
     }
+  }
+
+  void _showDeleteConfirmation(int index) {
+    final app = apps[index];
+    void doDelete() {
+      Navigator.of(context).pop();
+      setState(() {
+        apps.removeAt(index);
+        if (_selectedIndex >= apps.length) {
+          _selectedIndex = apps.length > 0 ? apps.length - 1 : 0;
+        }
+      });
+      _saveApps();
+    }
+
+    showDialog(
+      context: context,
+      builder: (context) => KeyboardListener(
+        focusNode: FocusNode()..requestFocus(),
+        autofocus: true,
+        onKeyEvent: (event) {
+          if (event is KeyDownEvent &&
+              (event.logicalKey == LogicalKeyboardKey.enter ||
+               event.logicalKey == LogicalKeyboardKey.delete)) {
+            doDelete();
+          }
+        },
+        child: AlertDialog(
+          backgroundColor: const Color(0xFF2A2A4E),
+          title: const Text('Delete App', style: TextStyle(color: Colors.white)),
+          content: Text(
+            'Delete "${app.name}"?',
+            style: const TextStyle(color: Colors.white70),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+              ),
+              onPressed: doDelete,
+              child: const Text('Delete'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _showAddDialog() {

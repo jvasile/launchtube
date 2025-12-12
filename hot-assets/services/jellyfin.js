@@ -870,6 +870,17 @@
             elements.push({ el: nav, rect, type: 'nav' });
         });
 
+        // Menu items (profile dropdown, etc.)
+        document.querySelectorAll('a.listItem-border.emby-button:not(.hide)').forEach(item => {
+            const rect = item.getBoundingClientRect();
+            if (rect.width < 20 || rect.height < 20) return;
+            const style = window.getComputedStyle(item);
+            if (style.opacity === '0' || style.visibility === 'hidden' || style.display === 'none') return;
+            if (seen.has(item)) return;
+            seen.add(item);
+            elements.push({ el: item, rect, type: 'menu' });
+        });
+
         // Cards (but not the detail page poster)
         document.querySelectorAll('.card').forEach(card => {
             const rect = card.getBoundingClientRect();
@@ -1097,7 +1108,21 @@
             }
         }
 
-        // On non-detail pages, prioritize first visible card (even if navbar selected)
+        // On settings/menu pages, prioritize first menu item
+        if (!hasAutoSelected) {
+            const menuItem = document.querySelector('a.listItem-border.emby-button:not(.hide)');
+            if (menuItem) {
+                const rect = menuItem.getBoundingClientRect();
+                if (rect.width > 0 && rect.height > 0 && rect.top < window.innerHeight) {
+                    hasAutoSelected = true;
+                    selectElement(menuItem);
+                    serverLog('Auto-selected first menu item');
+                    return;
+                }
+            }
+        }
+
+        // On non-detail pages, prioritize first visible card
         if (!playBtn && !hasAutoSelected) {
             const cards = Array.from(document.querySelectorAll('.card')).filter(card => {
                 if (card.closest('.detailImageContainer')) return false;

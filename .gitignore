@@ -47,3 +47,4 @@ app.*.map.json
 # Claude
 .claude
 CLAUDE.md
+build-windows-wsl.sh

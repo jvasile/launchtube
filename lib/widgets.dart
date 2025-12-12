@@ -369,6 +369,19 @@ class _LauncherHomeState extends State<LauncherHome> {
     ScreensaverInhibitor.getInstance().setBrowser(null, null);
   }
 
+  Future<void> _restartApp() async {
+    await ExternalPlayer.getInstance().stop();
+    await _closeBrowser();
+    await Process.start(Platform.resolvedExecutable, [], mode: ProcessStartMode.detached);
+    exit(0);
+  }
+
+  Future<void> _quitApp() async {
+    await ExternalPlayer.getInstance().stop();
+    await _closeBrowser();
+    exit(0);
+  }
+
   void _openAdminBrowser(BrowserInfo browser) async {
     // Check if browser is already running
     if (_browserProcess != null) {
@@ -450,6 +463,22 @@ class _LauncherHomeState extends State<LauncherHome> {
 
   void _handleKeyEvent(KeyEvent event) {
     if (event is KeyDownEvent) {
+      // Ctrl+Shift+R to restart app
+      if (HardwareKeyboard.instance.isControlPressed &&
+          HardwareKeyboard.instance.isShiftPressed &&
+          event.logicalKey == LogicalKeyboardKey.keyR) {
+        _restartApp();
+        return;
+      }
+
+      // Ctrl+Shift+Q to quit app
+      if (HardwareKeyboard.instance.isControlPressed &&
+          HardwareKeyboard.instance.isShiftPressed &&
+          event.logicalKey == LogicalKeyboardKey.keyQ) {
+        _quitApp();
+        return;
+      }
+
       setState(() {
         final totalItems = apps.length + 1; // +1 for add button
         const int columns = 4;
@@ -571,6 +600,8 @@ class _LauncherHomeState extends State<LauncherHome> {
               _HelpRow(shortcut: 'M', description: 'Move app'),
               _HelpRow(shortcut: 'Delete', description: 'Delete app'),
               _HelpRow(shortcut: 'Escape', description: 'Cancel'),
+              _HelpRow(shortcut: 'Ctrl+Shift+R', description: 'Restart app'),
+              _HelpRow(shortcut: 'Ctrl+Shift+Q', description: 'Quit app'),
               _HelpRow(shortcut: '?', description: 'Show this help'),
             ],
           ),
@@ -2116,7 +2147,7 @@ class _HelpRow extends StatelessWidget {
       child: Row(
         children: [
           SizedBox(
-            width: 100,
+            width: 140,
             child: Text(
               shortcut,
               style: const TextStyle(

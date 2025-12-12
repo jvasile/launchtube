@@ -99,6 +99,21 @@ class LaunchTubeServer {
         ..close();
       // Exit the application after responding
       Future.delayed(const Duration(milliseconds: 100), () => exit(0));
+    } else if (request.uri.path == '/api/1/restart') {
+      // Stop player and close browser before restarting
+      await ExternalPlayer.getInstance().stop();
+      if (_closeBrowser != null) {
+        await _closeBrowser!();
+      }
+      request.response
+        ..headers.contentType = ContentType.json
+        ..write('{"status":"ok","message":"restarting"}')
+        ..close();
+      // Launch new instance and exit
+      Future.delayed(const Duration(milliseconds: 100), () async {
+        await Process.start(Platform.resolvedExecutable, [], mode: ProcessStartMode.detached);
+        exit(0);
+      });
     } else if (request.uri.path == '/api/1/status') {
       // Status endpoint with server info
       final status = jsonEncode({
@@ -110,6 +125,7 @@ class LaunchTubeServer {
           '/api/1/version',
           '/api/1/status',
           '/api/1/shutdown',
+          '/api/1/restart',
           '/api/1/match?url={pageUrl}&version={serviceVersion}',
           '/api/1/service/{serviceId}',
           '/api/1/kv/{serviceId}',

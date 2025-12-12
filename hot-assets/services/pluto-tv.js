@@ -33,6 +33,89 @@
     attachGuideButtonListener();
 
     let guideObserver = null;
+    let hasFocusedProgram = false;
+
+    // Watch for video play and go fullscreen
+    function setupVideoFullscreen() {
+        const video = document.querySelector('video');
+        if (video && !video._launchTubeListener) {
+            video._launchTubeListener = true;
+            video.addEventListener('play', () => {
+                serverLog('Video started playing, requesting fullscreen');
+                const player = document.querySelector('[class*="videoPlayerContainer"]') || video;
+                if (player.requestFullscreen) {
+                    player.requestFullscreen().catch(e => serverLog('Fullscreen error: ' + e));
+                } else if (video.requestFullscreen) {
+                    video.requestFullscreen().catch(e => serverLog('Fullscreen error: ' + e));
+                }
+            });
+            serverLog('Attached video play listener');
+        }
+    }
+
+    // When exiting fullscreen, click highlighted program to restore keyboard nav
+    document.addEventListener('fullscreenchange', () => {
+        if (!document.fullscreenElement) {
+            serverLog('Exited fullscreen, restoring keyboard nav');
+            // Small delay for DOM to update after fullscreen exit
+            setTimeout(() => {
+                const currentProgram = document.querySelector('[role="gridcell"][aria-selected="true"] a[tabindex="0"]');
+                if (currentProgram) {
+                    currentProgram.click();
+                    serverLog('Clicked current program after fullscreen exit');
+                } else {
+                    serverLog('No current program found after fullscreen exit');
+                }
+            }, 100);
+        }
+    });
+
+    // If user clicks/enters on a program that's already playing, go fullscreen
+    function goFullscreenIfPlaying() {
+        const video = document.querySelector('video');
+        if (video && !video.paused && !document.fullscreenElement) {
+            serverLog('Video already playing, requesting fullscreen');
+            const player = document.querySelector('[class*="videoPlayerContainer"]') || video;
+            if (player.requestFullscreen) {
+                player.requestFullscreen().catch(e => serverLog('Fullscreen error: ' + e));
+            }
+        }
+    }
+
+    // Listen for Enter key on guide to trigger fullscreen for already-playing video (only firstColumn)
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' && !document.fullscreenElement) {
+            const active = document.activeElement;
+            const gridcell = active?.closest('[role="gridcell"]');
+            if (gridcell) {
+                const timeline = gridcell.querySelector('[class*="timeline"]');
+                const classes = timeline?.className || 'no timeline';
+                const hasFirstColumn = classes.includes('firstColumn');
+                serverLog(`Enter: activeElement gridcell, firstColumn=${hasFirstColumn}`);
+                serverLog(`  classes=${classes.substring(0, 70)}`);
+                if (hasFirstColumn) {
+                    serverLog('Enter on firstColumn, going fullscreen');
+                    setTimeout(goFullscreenIfPlaying, 100);
+                }
+            } else {
+                serverLog(`Enter: activeElement is ${active?.tagName} (not in gridcell)`);
+            }
+        }
+    });
+
+    // Listen for clicks on guide items (only firstColumn - currently playing)
+    document.addEventListener('click', (event) => {
+        const gridcell = event.target.closest('[role="gridcell"]');
+        if (gridcell) {
+            const classes = gridcell.querySelector('[class*="timeline"]')?.className || 'no timeline';
+            serverLog(`Clicked gridcell, timeline classes: ${classes.substring(0, 80)}`);
+        }
+        const clickedItem = event.target.closest('.firstColumn');
+        if (clickedItem && !document.fullscreenElement) {
+            serverLog('Clicked firstColumn, going fullscreen');
+            setTimeout(goFullscreenIfPlaying, 100);
+        }
+    });
 
     function hidePromoElements() {
         const container = document.querySelector('main [class*="liveTVLayoutContainer"]');
@@ -53,7 +136,21 @@
         if (guide && !guide.style.height) {
             guide.style.cssText = 'overflow: auto !important; height: calc(100vh - 64px) !important';
             serverLog('Expanded guide');
+
         }
+
+        // Click the currently selected program in the guide to enable keyboard nav (once)
+        if (!hasFocusedProgram) {
+            const currentProgram = document.querySelector('[role="gridcell"][aria-selected="true"] a[tabindex="0"]');
+            if (currentProgram) {
+                currentProgram.click();
+                hasFocusedProgram = true;
+                serverLog('Clicked current program');
+            }
+        }
+
+        // Setup video fullscreen listener
+        setupVideoFullscreen();
 
         return hiddenAny;
     }
@@ -86,9 +183,20 @@
             return;
         }
 
-        // Escape key - show exit confirmation
+        // Escape key - close detail modal if open, otherwise show exit confirmation
         if (event.key === 'Escape' && !confirmationElement) {
             if (document.fullscreenElement) return;
+
+            // Check for detail modal close button
+            const closeModal = document.querySelector('.closeModalButton-0-2-452, [class*="closeModalButton"]');
+            if (closeModal) {
+                event.preventDefault();
+                event.stopPropagation();
+                closeModal.click();
+                serverLog('Closed detail modal');
+                return;
+            }
+
             event.preventDefault();
             event.stopPropagation();
             showExitConfirmation();

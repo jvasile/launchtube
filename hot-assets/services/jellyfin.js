@@ -80,8 +80,10 @@
     let modalElement = null;
     let statusElement = null;
     let pollInterval = null;
-
     let dialogObserver = null;
+
+    // Navigation state (used by escape handler and nav code)
+    let ignoreMouseUntil = 0;
 
     function showModal(message) {
         if (modalElement) return;
@@ -210,7 +212,7 @@
                                  window.location.hash.includes('id=');
             if (isDetailPage) {
                 serverLog('Escape on detail page, going back');
-                ignoreMouseUntil = Date.now() + 1000; // Ignore mouse for 1s after going back
+                ignoreMouseUntil = Date.now() + 1000;
                 history.back();
                 return;
             }
@@ -755,91 +757,10 @@
         });
     }
 
-    // Debug: Log card structure when pressing 'i' key
-    function logCardStructure() {
-        serverLog('=== Card Structure Debug ===');
-
-        // Log navbar elements
-        const navSelectors = '.headerTabs, .headerTabs a, .headerButton, .headerRight, .skinHeader, .mainDrawerButton, [class*="header"]';
-        const navElements = document.querySelectorAll(navSelectors);
-        serverLog(`Found ${navElements.length} potential navbar elements:`);
-        Array.from(navElements).slice(0, 15).forEach((el, i) => {
-            const rect = el.getBoundingClientRect();
-            const classes = el.className?.substring(0, 50) || '';
-            const tag = el.tagName;
-            const text = el.textContent?.trim()?.substring(0, 20) || '';
-            serverLog(`  Nav[${i}]: <${tag}> "${text}" class="${classes}" top=${Math.round(rect.top)} left=${Math.round(rect.left)} w=${Math.round(rect.width)}`);
-        });
-
-        // Log all emby-tab-button elements
-        const tabButtons = document.querySelectorAll('.emby-tab-button');
-        serverLog(`emby-tab-button elements (${tabButtons.length}):`);
-        tabButtons.forEach((el, i) => {
-            const rect = el.getBoundingClientRect();
-            const text = el.textContent?.trim() || '';
-            const classes = el.className?.substring(0, 50) || '';
-            serverLog(`  TabBtn[${i}]: "${text}" class="${classes}" top=${Math.round(rect.top)} left=${Math.round(rect.left)} w=${Math.round(rect.width)} h=${Math.round(rect.height)}`);
-        });
-
-        // Log actual navigable elements
-        const navEls = getNavigableElements();
-        serverLog(`Actual navigable elements (${navEls.length}):`);
-        navEls.filter(n => n.type === 'nav').forEach((n, i) => {
-            const text = n.el.textContent?.trim()?.substring(0, 15) || '';
-            serverLog(`  NavEl[${i}]: "${text}" left=${Math.round(n.rect.left)} w=${Math.round(n.rect.width)}`);
-        });
-
-        // Log play buttons on detail page
-        const playButtons = document.querySelectorAll('.btnPlay, .btnResume, .detailButton, [data-action="play"], [data-action="resume"]');
-        if (playButtons.length > 0) {
-            serverLog(`Found ${playButtons.length} play-related buttons:`);
-            playButtons.forEach((btn, i) => {
-                const classes = btn.className?.substring(0, 60) || '';
-                const text = btn.textContent?.trim()?.substring(0, 30) || '';
-                const action = btn.dataset?.action || '';
-                serverLog(`  Btn[${i}]: "${text}" class="${classes}" action=${action}`);
-            });
-        }
-
-        // Find all cards that are visible (have non-zero size and in viewport)
-        const allCards = document.querySelectorAll('.card');
-        const visibleCards = Array.from(allCards).filter(card => {
-            const rect = card.getBoundingClientRect();
-            return rect.width > 0 && rect.height > 0 && rect.top < window.innerHeight && rect.bottom > 0;
-        });
-
-        serverLog(`Found ${allCards.length} total, ${visibleCards.length} visible .card elements`);
-
-        // Log first few visible cards with their titles
-        visibleCards.slice(0, 5).forEach((card, i) => {
-            const rect = card.getBoundingClientRect();
-            const dataId = card.dataset?.id || card.querySelector('[data-id]')?.dataset?.id || 'none';
-            const title = card.querySelector('.cardText, .cardTextCentered, [class*="cardText"]')?.textContent?.trim() || 'no title';
-            serverLog(`Card[${i}]: "${title.substring(0, 30)}" id=${dataId.substring(0, 12)} top=${Math.round(rect.top)} left=${Math.round(rect.left)} w=${Math.round(rect.width)}`);
-        });
-
-        // Find the parent container of visible cards
-        if (visibleCards.length > 0) {
-            const parent = visibleCards[0].parentElement;
-            serverLog(`Parent: ${parent?.tagName} class="${parent?.className?.substring(0, 60)}"`);
-        }
-
-        serverLog('=== End Debug ===');
-    }
-
-    // Debug key handler
-    document.addEventListener('keydown', (event) => {
-        if (event.key === 'i' && event.ctrlKey) {
-            event.preventDefault();
-            logCardStructure();
-        }
-    });
-
     // === Keyboard Navigation ===
     // Unified navigation across all interactive elements (cards, buttons, etc.)
     let selectedElement = null;
     let pendingEnter = false; // For double-enter detection on cards
-    let ignoreMouseUntil = 0; // Timestamp to ignore mouse events after keyboard nav
     let mouseHasMoved = false; // Only respond to mouse after it actually moves
 
     // Add highlight style
@@ -847,10 +768,6 @@
     navStyle.textContent = `
         .launchtube-selected .cardImageContainer {
             box-shadow: inset 0 0 0 4px #00a4dc, inset 0 0 0 6px #fff !important;
-        }
-        .launchtube-selected {
-            z-index: 9999 !important;
-            position: relative !important;
         }
         .launchtube-nav-highlight {
             box-shadow: inset 0 0 0 3px #00a4dc !important;
@@ -952,10 +869,29 @@
     function ensureElementVisible(element) {
         const rect = element.getBoundingClientRect();
         const navBarHeight = 100; // Approximate nav bar height
+
+        // Vertical scrolling for the main window
         if (rect.top < navBarHeight) {
             window.scrollBy({ top: rect.top - navBarHeight - 20, behavior: 'smooth' });
         } else if (rect.bottom > window.innerHeight) {
             window.scrollBy({ top: rect.bottom - window.innerHeight + 20, behavior: 'smooth' });
+        }
+
+        // Horizontal scrolling for card rows (they have their own scroll container)
+        if (rect.left < 0 || rect.right > window.innerWidth) {
+            // Jellyfin uses a scroller wrapper around scrollSlider - find it
+            const scrollSlider = element.closest('.scrollSlider');
+            if (scrollSlider) {
+                const scroller = scrollSlider.parentElement;
+                if (scroller) {
+                    const scrollerRect = scroller.getBoundingClientRect();
+                    if (rect.left < scrollerRect.left) {
+                        scroller.scrollBy({ left: rect.left - scrollerRect.left - 50, behavior: 'smooth' });
+                    } else if (rect.right > scrollerRect.right) {
+                        scroller.scrollBy({ left: rect.right - scrollerRect.right + 50, behavior: 'smooth' });
+                    }
+                }
+            }
         }
     }
 
@@ -1086,10 +1022,17 @@
         if (!mouseHasMoved) return; // Ignore until mouse actually moves
         if (Date.now() < ignoreMouseUntil) return;
 
-        // Check for card or button
-        const card = event.target.closest('.card');
+        // Check for card, button, tab, or navbar element
+        let card = event.target.closest('.card');
+        // Skip poster card on detail pages - it's not clickable
+        if (card && card.closest('.detailImageContainer')) card = null;
         const button = event.target.closest('.btnPlay, .btnResume, .detailButton');
-        const target = card || button;
+        let tab = event.target.closest('.emby-tab-button');
+        // Skip active tab (current page)
+        if (tab && tab.classList.contains('emby-tab-button-active')) tab = null;
+        const nav = event.target.closest('.headerBackButton, .headerHomeButton, .mainDrawerButton, .headerSyncButton, .headerCastButton, .headerSearchButton, .headerUserButton');
+        const menuItem = event.target.closest('a.listItem-border.emby-button');
+        const target = card || button || tab || nav || menuItem;
 
         if (target && target !== selectedElement) {
             clearTimeout(mouseDebounceTimer);
@@ -1105,20 +1048,26 @@
     function autoSelectFirst() {
         // On detail pages, prioritize play/resume button
         const playBtn = document.querySelector('.btnPlay:not(.hide), .btnResume:not(.hide)');
-        if (playBtn && !hasAutoSelected) {
+        let hasVisiblePlayBtn = false;
+        if (playBtn) {
             const rect = playBtn.getBoundingClientRect();
             if (rect.width > 0 && rect.height > 0) {
-                hasAutoSelected = true;
-                selectElement(playBtn);
-                serverLog('Auto-selected play button');
+                hasVisiblePlayBtn = true;
+                // Select play button if: not yet selected, OR currently have a card selected (upgrade card to button)
+                const currentIsCard = selectedElement && selectedElement.classList.contains('card');
+                if (!hasAutoSelected || currentIsCard) {
+                    hasAutoSelected = true;
+                    selectElement(playBtn);
+                    serverLog('Auto-selected play button');
+                }
                 return;
             }
         }
 
         // On settings/menu pages, prioritize first menu item
         if (!hasAutoSelected) {
-            const menuItem = document.querySelector('a.listItem-border.emby-button:not(.hide)');
-            if (menuItem) {
+            const menuItems = document.querySelectorAll('a.listItem-border.emby-button:not(.hide)');
+            for (const menuItem of menuItems) {
                 const rect = menuItem.getBoundingClientRect();
                 if (rect.width > 0 && rect.height > 0 && rect.top < window.innerHeight) {
                     hasAutoSelected = true;
@@ -1129,8 +1078,8 @@
             }
         }
 
-        // On non-detail pages, prioritize first visible card
-        if (!playBtn && !hasAutoSelected) {
+        // On non-detail pages (no visible play button), prioritize first visible card
+        if (!hasVisiblePlayBtn && !hasAutoSelected) {
             const cards = Array.from(document.querySelectorAll('.card')).filter(card => {
                 if (card.closest('.detailImageContainer')) return false;
                 const rect = card.getBoundingClientRect();
@@ -1151,9 +1100,39 @@
     }
 
     // Watch for page changes
+    let lastUrl = location.href;
     const pageObserver = new MutationObserver(() => {
-        // If selected element is gone, clear and auto-select
-        if (selectedElement && !document.body.contains(selectedElement)) {
+        // Detect URL change (hash navigation)
+        if (location.href !== lastUrl) {
+            serverLog(`URL changed: ${lastUrl} -> ${location.href}`);
+            lastUrl = location.href;
+            if (selectedElement) {
+                selectedElement.classList.remove('launchtube-selected', 'launchtube-nav-highlight');
+            }
+            selectedElement = null;
+            hasAutoSelected = false;
+            mouseHasMoved = false;
+            document.addEventListener('mousemove', () => { mouseHasMoved = true; }, { once: true });
+            setTimeout(autoSelectFirst, 300);
+            return;
+        }
+
+        // Check if selected element is gone or no longer visible
+        let selectionInvalid = false;
+        if (selectedElement) {
+            if (!document.body.contains(selectedElement)) {
+                selectionInvalid = true;
+            } else {
+                // Check if still visible (not hidden by tab switch, etc.)
+                const rect = selectedElement.getBoundingClientRect();
+                if (rect.width === 0 || rect.height === 0) {
+                    selectionInvalid = true;
+                }
+            }
+        }
+
+        if (selectionInvalid) {
+            selectedElement.classList.remove('launchtube-selected', 'launchtube-nav-highlight');
             selectedElement = null;
             hasAutoSelected = false; // Reset for new page
             mouseHasMoved = false; // Reset so mouse doesn't immediately take over
@@ -1171,8 +1150,101 @@
     });
     pageObserver.observe(document.body, { childList: true, subtree: true });
 
+    // Listen for hash changes (Jellyfin uses hash-based routing)
+    window.addEventListener('hashchange', () => {
+        serverLog(`Hash changed to: ${location.hash}`);
+        if (selectedElement) {
+            selectedElement.classList.remove('launchtube-selected', 'launchtube-nav-highlight');
+        }
+        selectedElement = null;
+        hasAutoSelected = false;
+        mouseHasMoved = false;
+        document.addEventListener('mousemove', () => { mouseHasMoved = true; }, { once: true });
+        setTimeout(autoSelectFirst, 300);
+    });
+
     // Initial auto-select
     setTimeout(autoSelectFirst, 500);
+
+    // Debug: Log card structure when pressing Ctrl+I
+    function logCardStructure() {
+        serverLog('=== Card Structure Debug ===');
+
+        // Log navbar elements
+        const navSelectors = '.headerTabs, .headerTabs a, .headerButton, .headerRight, .skinHeader, .mainDrawerButton, [class*="header"]';
+        const navElements = document.querySelectorAll(navSelectors);
+        serverLog(`Found ${navElements.length} potential navbar elements:`);
+        Array.from(navElements).slice(0, 15).forEach((el, i) => {
+            const rect = el.getBoundingClientRect();
+            const classes = el.className?.substring(0, 50) || '';
+            const tag = el.tagName;
+            const text = el.textContent?.trim()?.substring(0, 20) || '';
+            serverLog(`  Nav[${i}]: <${tag}> "${text}" class="${classes}" top=${Math.round(rect.top)} left=${Math.round(rect.left)} w=${Math.round(rect.width)}`);
+        });
+
+        // Log all emby-tab-button elements
+        const tabButtons = document.querySelectorAll('.emby-tab-button');
+        serverLog(`emby-tab-button elements (${tabButtons.length}):`);
+        tabButtons.forEach((el, i) => {
+            const rect = el.getBoundingClientRect();
+            const text = el.textContent?.trim() || '';
+            const classes = el.className?.substring(0, 50) || '';
+            serverLog(`  TabBtn[${i}]: "${text}" class="${classes}" top=${Math.round(rect.top)} left=${Math.round(rect.left)} w=${Math.round(rect.width)} h=${Math.round(rect.height)}`);
+        });
+
+        // Log actual navigable elements
+        const navEls = getNavigableElements();
+        serverLog(`Actual navigable elements (${navEls.length}):`);
+        navEls.filter(n => n.type === 'nav').forEach((n, i) => {
+            const text = n.el.textContent?.trim()?.substring(0, 15) || '';
+            serverLog(`  NavEl[${i}]: "${text}" left=${Math.round(n.rect.left)} w=${Math.round(n.rect.width)}`);
+        });
+
+        // Log play buttons on detail page
+        const playButtons = document.querySelectorAll('.btnPlay, .btnResume, .detailButton, [data-action="play"], [data-action="resume"]');
+        if (playButtons.length > 0) {
+            serverLog(`Found ${playButtons.length} play-related buttons:`);
+            playButtons.forEach((btn, i) => {
+                const classes = btn.className?.substring(0, 60) || '';
+                const text = btn.textContent?.trim()?.substring(0, 30) || '';
+                const action = btn.dataset?.action || '';
+                serverLog(`  Btn[${i}]: "${text}" class="${classes}" action=${action}`);
+            });
+        }
+
+        // Find all cards that are visible (have non-zero size and in viewport)
+        const allCards = document.querySelectorAll('.card');
+        const visibleCards = Array.from(allCards).filter(card => {
+            const rect = card.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0 && rect.top < window.innerHeight && rect.bottom > 0;
+        });
+
+        serverLog(`Found ${allCards.length} total, ${visibleCards.length} visible .card elements`);
+
+        // Log first few visible cards with their titles
+        visibleCards.slice(0, 5).forEach((card, i) => {
+            const rect = card.getBoundingClientRect();
+            const dataId = card.dataset?.id || card.querySelector('[data-id]')?.dataset?.id || 'none';
+            const title = card.querySelector('.cardText, .cardTextCentered, [class*="cardText"]')?.textContent?.trim() || 'no title';
+            serverLog(`Card[${i}]: "${title.substring(0, 30)}" id=${dataId.substring(0, 12)} top=${Math.round(rect.top)} left=${Math.round(rect.left)} w=${Math.round(rect.width)}`);
+        });
+
+        // Find the parent container of visible cards
+        if (visibleCards.length > 0) {
+            const parent = visibleCards[0].parentElement;
+            serverLog(`Parent: ${parent?.tagName} class="${parent?.className?.substring(0, 60)}"`);
+        }
+
+        serverLog('=== End Debug ===');
+    }
+
+    // Debug key handler
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'i' && event.ctrlKey) {
+            event.preventDefault();
+            logCardStructure();
+        }
+    });
 
     // Initialize
     function init() {
@@ -1183,8 +1255,6 @@
         interceptVideoPlayback();
         // Global escape to exit when not playing
         document.addEventListener('keydown', handleGlobalEscape, true);
-
-        serverLog('Press Ctrl+I to log card structure');
     }
 
     if (document.readyState === 'loading') {

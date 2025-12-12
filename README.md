@@ -135,3 +135,17 @@ self-hosted (like Emby) or delivered from a company like Netflix.
 This should work on Linux or Windows or even WSL.  If you're going to run
 launchtube in WSL, it's best to install mpv.exe on the Windows side.  Running
 your media player from the Windows side works much better.
+
+### Windows
+
+To build on Windows, you'll need git and flutter installed:
+
+```
+scoop install git
+scoop install flutter
+```
+
+### WSL
+
+You *can* develop on the WSL side but build and run on the Windows side.  This
+is what I do.  There are many ways to accomplish this.

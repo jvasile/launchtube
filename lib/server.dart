@@ -291,16 +291,29 @@ class LaunchTubeServer {
 
     // Find matching app by checking if app URL is a prefix of page URL
     final normalizedPageUrl = normalizeUrlForMatching(pageUrl);
+    Log.write('Match request: pageUrl=$pageUrl normalized=$normalizedPageUrl');
+    Log.write('Apps count: ${apps.length}');
     String? matchedServiceName;
     for (final app in apps) {
-      if (app.url == null) continue;
+      // Build list of URLs to check: main url + any matchUrls
+      final urlsToCheck = <String>[
+        if (app.url != null) app.url!,
+        ...(app.matchUrls ?? []),
+      ];
 
-      // Check if app URL is a prefix of the page URL
-      final normalizedAppUrl = normalizeUrlForMatching(app.url!);
-      if (normalizedPageUrl.startsWith(normalizedAppUrl)) {
-        matchedServiceName = app.name;
-        break;
+      if (urlsToCheck.isEmpty) continue;
+
+      Log.write('  Checking ${app.name}: urls=${urlsToCheck.join(", ")}');
+
+      for (final checkUrl in urlsToCheck) {
+        final normalizedAppUrl = normalizeUrlForMatching(checkUrl);
+        if (normalizedPageUrl.startsWith(normalizedAppUrl)) {
+          matchedServiceName = app.name;
+          Log.write('  -> MATCHED on $checkUrl');
+          break;
+        }
       }
+      if (matchedServiceName != null) break;
     }
 
     if (matchedServiceName == null) {

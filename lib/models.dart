@@ -6,6 +6,7 @@ enum AppType { website, native }
 class AppConfig {
   String name;
   String? url;
+  List<String>? matchUrls; // Additional URL patterns for script matching
   String? commandLine;
   AppType type;
   String? imagePath;
@@ -15,6 +16,7 @@ class AppConfig {
   AppConfig({
     required this.name,
     this.url,
+    this.matchUrls,
     this.commandLine,
     required this.type,
     this.imagePath,
@@ -27,6 +29,7 @@ class AppConfig {
   Map<String, dynamic> toJson() => {
         'name': name,
         'url': url,
+        'matchUrls': matchUrls,
         'commandLine': commandLine,
         'type': type.index,
         'imagePath': imagePath,
@@ -37,6 +40,7 @@ class AppConfig {
   factory AppConfig.fromJson(Map<String, dynamic> json) => AppConfig(
         name: json['name'],
         url: json['url'],
+        matchUrls: (json['matchUrls'] as List<dynamic>?)?.cast<String>(),
         commandLine: json['commandLine'],
         type: AppType.values[json['type']],
         imagePath: json['imagePath'],
@@ -47,6 +51,7 @@ class AppConfig {
   AppConfig copy() => AppConfig(
         name: name,
         url: url,
+        matchUrls: matchUrls != null ? List<String>.from(matchUrls!) : null,
         commandLine: commandLine,
         type: type,
         imagePath: imagePath,
@@ -96,6 +101,7 @@ class BrowserInfo {
 class ServiceTemplate {
   final String name;
   final String url;
+  final List<String>? matchUrls; // Additional URL patterns for script matching
   final int colorValue;
   final String? logoPath;
   final bool isBundled; // true = bundled asset, false = user file
@@ -103,6 +109,7 @@ class ServiceTemplate {
   const ServiceTemplate({
     required this.name,
     required this.url,
+    this.matchUrls,
     required this.colorValue,
     this.logoPath,
     this.isBundled = true,
@@ -112,6 +119,7 @@ class ServiceTemplate {
     return ServiceTemplate(
       name: json['name'] as String,
       url: json['url'] as String,
+      matchUrls: (json['matchUrls'] as List<dynamic>?)?.cast<String>(),
       colorValue: _parseColor(json['color'] as String),
       logoPath: logoPath,
       isBundled: isBundled,
@@ -126,6 +134,7 @@ class ServiceTemplate {
   AppConfig toAppConfig() => AppConfig(
     name: name,
     url: url,
+    matchUrls: matchUrls,
     type: AppType.website,
     colorValue: colorValue,
     imagePath: logoPath,

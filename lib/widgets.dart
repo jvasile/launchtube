@@ -1296,6 +1296,7 @@ class AppConfigDialog extends StatefulWidget {
 class _AppConfigDialogState extends State<AppConfigDialog> {
   late TextEditingController _nameController;
   late TextEditingController _urlController;
+  late TextEditingController _matchUrlsController;
   late TextEditingController _commandLineController;
   late TextEditingController _imagePathController;
   late AppType _type;
@@ -1307,6 +1308,7 @@ class _AppConfigDialogState extends State<AppConfigDialog> {
     super.initState();
     _nameController = TextEditingController(text: widget.app.name);
     _urlController = TextEditingController(text: widget.app.url ?? '');
+    _matchUrlsController = TextEditingController(text: widget.app.matchUrls?.join('\n') ?? '');
     _commandLineController = TextEditingController(text: widget.app.commandLine ?? '');
     _imagePathController = TextEditingController(text: widget.app.imagePath ?? '');
     _type = widget.app.type;
@@ -1318,6 +1320,7 @@ class _AppConfigDialogState extends State<AppConfigDialog> {
   void dispose() {
     _nameController.dispose();
     _urlController.dispose();
+    _matchUrlsController.dispose();
     _commandLineController.dispose();
     _imagePathController.dispose();
     super.dispose();
@@ -1402,6 +1405,13 @@ class _AppConfigDialogState extends State<AppConfigDialog> {
 
     widget.app.name = _nameController.text;
     widget.app.url = _type == AppType.website ? _urlController.text : null;
+    // Parse matchUrls from newline-separated text, filter empty lines
+    final matchUrlsList = _matchUrlsController.text
+        .split('\n')
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+    widget.app.matchUrls = _type == AppType.website && matchUrlsList.isNotEmpty ? matchUrlsList : null;
     widget.app.commandLine = _type == AppType.native ? _commandLineController.text : null;
     widget.app.type = _type;
     widget.app.imagePath = _imagePathController.text.isEmpty ? null : _imagePathController.text;
@@ -1456,7 +1466,7 @@ class _AppConfigDialogState extends State<AppConfigDialog> {
                 },
               ),
               const SizedBox(height: 16),
-              if (_type == AppType.website)
+              if (_type == AppType.website) ...[
                 TextField(
                   controller: _urlController,
                   decoration: const InputDecoration(
@@ -1465,6 +1475,17 @@ class _AppConfigDialogState extends State<AppConfigDialog> {
                     border: OutlineInputBorder(),
                   ),
                 ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: _matchUrlsController,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    labelText: 'Additional pages to run JavaScript on',
+                    hintText: 'URL prefixes, one per line',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
               if (_type == AppType.native)
                 TextField(
                   controller: _commandLineController,

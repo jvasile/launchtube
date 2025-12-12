@@ -1,5 +1,6 @@
 {
   "name": "Amazon Prime",
   "url": "https://amazon.com/video",
+  "matchUrls": ["https://amazon.com/gp/video"],
   "color": "#FFFFFF"
 }

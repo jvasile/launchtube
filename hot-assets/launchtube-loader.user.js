@@ -1,13 +1,15 @@
 // ==UserScript==
 // @name         Launch Tube Loader
 // @namespace    com.launchtube
-// @version      5
+// @version      8
 // @description  Loads service-specific scripts from Launch Tube app
 // NOTE: When modifying this file, bump @version to trigger browsers to load the new version
 // @match        *://*/*
 // @grant        GM.xmlHttpRequest
 // @grant        GM_xmlhttpRequest
 // @grant        GM_closeTab
+// @grant        GM_addElement
+// @grant        unsafeWindow
 // @connect      localhost
 // @connect      127.0.0.1
 // @run-at       document-start
@@ -79,6 +81,7 @@
     }
 
     // Ask server to match current URL and return script
+    // Uses GM_addElement to bypass Trusted Types CSP (e.g., YouTube)
     async function loadScript(port) {
         try {
             const response = await gmFetch({
@@ -86,11 +89,16 @@
                 url: `http://localhost:${port}/api/1/match?url=${encodeURIComponent(location.href)}`,
             });
             if (response.status === 200 && response.responseText) {
-                const script = document.createElement('script');
-                script.textContent = response.responseText;
-                // Make the port available to the script
-                script.textContent = `window.LAUNCH_TUBE_PORT = ${port};\n` + script.textContent;
-                (document.head || document.documentElement).appendChild(script);
+                const code = `window.LAUNCH_TUBE_PORT = ${port};\n` + response.responseText;
+                if (typeof GM_addElement !== 'undefined') {
+                    // Tampermonkey: use GM_addElement to bypass Trusted Types
+                    GM_addElement('script', { textContent: code });
+                } else {
+                    // Fallback for other userscript managers
+                    const script = document.createElement('script');
+                    script.textContent = code;
+                    (document.head || document.documentElement).appendChild(script);
+                }
                 console.log('Launch Tube: Loaded script for', location.hostname);
             }
         } catch (e) {
@@ -98,20 +106,35 @@
         }
     }
 
-    // Expose GM_closeTab to page scripts via a global function
-    function exposeCloseTab() {
-        const script = document.createElement('script');
-        script.textContent = `window.launchTubeCloseTab = function() { window.postMessage({ type: 'launchtube-close-tab' }, '*'); };`;
-        document.documentElement.appendChild(script);
-        script.remove();
+    // Expose functions to page scripts via unsafeWindow
+    // Uses unsafeWindow to bypass Trusted Types CSP (e.g., YouTube)
+    function exposePageFunctions() {
+        if (typeof unsafeWindow !== 'undefined') {
+            unsafeWindow.launchTubeCloseTab = function() {
+                window.postMessage({ type: 'launchtube-close-tab' }, '*');
+            };
+            unsafeWindow.launchTubeLog = function(message, level) {
+                window.postMessage({ type: 'launchtube-log', message: message, level: level || 'info' }, '*');
+            };
+        }
     }
 
     // Main entry point
     async function main() {
         console.log('Launch Tube: Loader running on', location.hostname);
 
-        // Listen for close tab requests from page scripts
+        // Listen for requests from page scripts
         window.addEventListener('message', async (e) => {
+            // Log relay - forwards logs to server via gmFetch (bypasses mixed content)
+            if (e.data?.type === 'launchtube-log' && detectedPort) {
+                gmFetch({
+                    method: 'POST',
+                    url: `http://localhost:${detectedPort}/api/1/log`,
+                    headers: { 'Content-Type': 'application/json' },
+                    data: JSON.stringify({ message: e.data.message, level: e.data.level || 'info' }),
+                }).catch(() => {});
+            }
+            // Close tab request
             if (e.data?.type === 'launchtube-close-tab') {
                 console.log('Launch Tube: Close tab requested');
                 // Call server to close browser (using gmFetch to bypass mixed content blocking)
@@ -142,8 +165,8 @@
             }
         });
 
-        // Expose the close function to page scripts
-        exposeCloseTab();
+        // Expose functions to page scripts
+        exposePageFunctions();
 
         const port = await findServer();
         if (!port) {
@@ -154,7 +177,7 @@
         console.log('Launch Tube: Found server on port', port);
 
         // Announce to setup page that we're working (version must match @version above)
-        window.postMessage({ type: 'launchtube-loader-ready', port: port, version: 5 }, '*');
+        window.postMessage({ type: 'launchtube-loader-ready', port: port, version: 8 }, '*');
 
         loadScript(port);
     }

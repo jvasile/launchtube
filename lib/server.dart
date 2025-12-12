@@ -281,13 +281,23 @@ class LaunchTubeServer {
       return;
     }
 
+    // Normalize URL for matching: strip protocol and www prefix
+    String normalizeUrlForMatching(String url) {
+      var normalized = url.toLowerCase();
+      normalized = normalized.replaceFirst(RegExp(r'^https?://'), '');
+      normalized = normalized.replaceFirst(RegExp(r'^www\.'), '');
+      return normalized;
+    }
+
     // Find matching app by checking if app URL is a prefix of page URL
+    final normalizedPageUrl = normalizeUrlForMatching(pageUrl);
     String? matchedServiceName;
     for (final app in apps) {
       if (app.url == null) continue;
 
       // Check if app URL is a prefix of the page URL
-      if (pageUrl.toLowerCase().startsWith(app.url!.toLowerCase())) {
+      final normalizedAppUrl = normalizeUrlForMatching(app.url!);
+      if (normalizedPageUrl.startsWith(normalizedAppUrl)) {
         matchedServiceName = app.name;
         break;
       }

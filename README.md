@@ -73,7 +73,7 @@ disabling your screensaver while you're playing videos in mpv or web apps.
 
 There are many ways to set this up.  Here is how I did it.
 
-## Guest Account
+### Guest Account
 
 If you're setting this up as a media PC, you'll need a user account.  On Linux,
 you can set this user account to automatically log in.  I chose the name "guest"
@@ -87,7 +87,7 @@ autologin-user=guest
 autologin-user-timeout=0
 ```
 
-## Screensaver
+### Screensaver
 
 ```
 $ sudo apt install mpv xscreensaver xscreensaver-gl-extra unclutter

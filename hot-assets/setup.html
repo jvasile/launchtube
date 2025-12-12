@@ -98,11 +98,54 @@
     </div>
 
     <script>
+        /*
+         * SETUP PAGE FLOW
+         * ===============
+         *
+         * This page handles setup of the LaunchTube userscript system.
+         *
+         * ACCESS MODES:
+         *   - Admin mode: /setup?target=  (empty target, from hamburger menu)
+         *   - Launch mode: /setup?target=https://streaming-site.com
+         *
+         * DETECTION MECHANISM:
+         * The loader userscript (launchtube-loader.user.js) runs on all pages.
+         * After connecting to the LaunchTube server, it sends a postMessage
+         * with type 'launchtube-loader-ready'. This page listens for that
+         * message to detect if the loader is installed and working.
+         *
+         * FLOW:
+         * 1. Page loads with main-container hidden (display: none)
+         * 2. runDetection() starts and waits 500ms for loader postMessage
+         * 3. Message listener calls markAllComplete() if loader detected
+         *
+         * IF LOADER IS DETECTED (postMessage received):
+         *   - markAllComplete() shows UI and marks step 1 complete
+         *   - Fetches /launchtube-loader.user.js to get expected version
+         *   - Compares installed version (from postMessage) with expected version
+         *   - If outdated: show "Update Loader Script" button
+         *   - If current: mark step 2 complete
+         *     - If has target URL: redirect to target
+         *     - If no target (admin mode): show "Return to Launcher" button
+         *
+         * IF LOADER NOT DETECTED (no postMessage within 500ms):
+         *   - runDetection() calls showSetupUI() to reveal the container
+         *   - For Chrome: Use CDP to check if Tampermonkey is installed
+         *     - If Tampermonkey found: show loader script install button
+         *     - If not found: show Tampermonkey install button first
+         *   - For Firefox: Show manual install flow (CDP doesn't work)
+         *
+         * IMPORTANT: markAllComplete() must call showSetupUI() because it can
+         * be triggered by postMessage BEFORE runDetection() finishes waiting.
+         * Without this, the container stays hidden even though steps are complete.
+         */
+
         const targetUrl = new URLSearchParams(location.search).get('target');
         const hasTarget = targetUrl && targetUrl !== '/';
         let setupComplete = false;
         let step1Complete = false;
         let loaderCheckDone = false;
+        let installedLoaderVersion = null;
 
         // Show the setup UI
         function showSetupUI() {
@@ -110,20 +153,38 @@
         }
 
         // Mark everything complete and redirect
-        function markAllComplete() {
-            if (setupComplete) return;
-            setupComplete = true;
-
+        async function markAllComplete() {
             // If we have a target and haven't shown UI yet, just redirect silently
             if (hasTarget && !loaderCheckDone) {
+                setupComplete = true;
                 window.open(targetUrl, '_self');
                 return;
             }
+
+            // Make sure UI is visible before updating it
+            showSetupUI();
 
             document.getElementById('step1').classList.add('complete');
             document.getElementById('step1-status').className = 'status success';
             document.getElementById('step1-status').textContent = 'Userscript manager installed!';
             document.getElementById('step1-install').classList.add('hidden');
+
+            // Check if loader needs update
+            const expectedVersion = await getExpectedLoaderVersion();
+            const needsUpdate = expectedVersion !== null &&
+                (installedLoaderVersion === null || installedLoaderVersion < expectedVersion);
+
+            if (needsUpdate) {
+                // Loader is outdated - don't set setupComplete so we re-check when new loader announces
+                document.getElementById('step2-status').className = 'status error';
+                document.getElementById('step2-status').textContent = 'Loader script needs update (v' + (installedLoaderVersion || '?') + ' → v' + expectedVersion + ')';
+                document.getElementById('step2-install').innerHTML = '<a class="btn" href="/launchtube-loader.user.js" target="_blank">Update Loader Script</a>';
+                document.getElementById('step2-install').classList.remove('hidden');
+                return;
+            }
+
+            // Setup is truly complete
+            setupComplete = true;
 
             document.getElementById('step2').classList.add('complete');
             document.getElementById('step2-status').className = 'status success';
@@ -146,6 +207,13 @@
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
                 closeBrowser();
+            }
+        });
+
+        // Re-check when page regains focus (e.g., after installing update in another tab)
+        window.addEventListener('focus', () => {
+            if (!setupComplete) {
+                location.reload();
             }
         });
 
@@ -195,10 +263,28 @@
         // Listen for loader script to announce itself (means BOTH are working)
         window.addEventListener('message', (e) => {
             if (e.data && e.data.type === 'launchtube-loader-ready') {
-                console.log('LaunchTube: Loader detected via postMessage');
+                console.log('LaunchTube: Loader detected via postMessage, version:', e.data.version);
+                installedLoaderVersion = e.data.version || null;
                 markAllComplete();
             }
         });
+
+        // Fetch the expected loader version from the server
+        async function getExpectedLoaderVersion() {
+            try {
+                const response = await fetch('/launchtube-loader.user.js');
+                if (response.ok) {
+                    const text = await response.text();
+                    const match = text.match(/@version\s+(\d+)/);
+                    if (match) {
+                        return parseInt(match[1], 10);
+                    }
+                }
+            } catch (e) {
+                console.log('LaunchTube: Failed to fetch expected version:', e);
+            }
+            return null;
+        }
 
         // Ask the server to detect userscript managers via CDP
         async function detectUserscriptManager() {

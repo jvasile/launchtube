@@ -1,8 +1,9 @@
 // ==UserScript==
 // @name         Launch Tube Loader
 // @namespace    com.launchtube
-// @version      2.0
+// @version      5
 // @description  Loads service-specific scripts from Launch Tube app
+// NOTE: When modifying this file, bump @version to trigger browsers to load the new version
 // @match        *://*/*
 // @grant        GM.xmlHttpRequest
 // @grant        GM_xmlhttpRequest
@@ -152,8 +153,8 @@
         detectedPort = port;
         console.log('Launch Tube: Found server on port', port);
 
-        // Announce to setup page that we're working
-        window.postMessage({ type: 'launchtube-loader-ready', port: port }, '*');
+        // Announce to setup page that we're working (version must match @version above)
+        window.postMessage({ type: 'launchtube-loader-ready', port: port, version: 5 }, '*');
 
         loadScript(port);
     }

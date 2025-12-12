@@ -369,7 +369,7 @@ class _LauncherHomeState extends State<LauncherHome> {
     ScreensaverInhibitor.getInstance().setBrowser(null, null);
   }
 
-  void _openAdminBrowser() async {
+  void _openAdminBrowser(BrowserInfo browser) async {
     // Check if browser is already running
     if (_browserProcess != null) {
       if (!mounted) return;
@@ -389,37 +389,33 @@ class _LauncherHomeState extends State<LauncherHome> {
       return;
     }
 
-    // Find an available browser
-    BrowserInfo? selectedBrowser;
-    List<String> runningBrowsers = [];
-    Set<String> seenNames = {};
-
-    for (final browser in _availableBrowsers) {
-      if (await _isBrowserRunning(browser.executable)) {
-        if (!seenNames.contains(browser.name)) {
-          runningBrowsers.add(browser.name);
-          seenNames.add(browser.name);
-        }
-      } else if (selectedBrowser == null) {
-        selectedBrowser = browser;
-      }
-    }
-
-    if (selectedBrowser == null) {
-      _showBrowserError(runningBrowsers);
+    // Check if this specific browser is already running
+    if (await _isBrowserRunning(browser.executable)) {
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Browser Running'),
+          content: Text('${browser.executable} is already running. Please close it first.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
       return;
     }
 
-    if (runningBrowsers.isNotEmpty) {
-      _showBrowserWarning(runningBrowsers, selectedBrowser.name);
-    }
+    final selectedBrowser = browser;
 
     try {
       // Open in non-kiosk mode for admin access
       final args = <String>[];
-      // Use --start-fullscreen for Chrome/Chromium, nothing for Firefox (no equivalent)
+      // Use --start-maximized for Chrome/Chromium admin mode, nothing for Firefox (no equivalent)
       if (selectedBrowser.name != 'Firefox') {
-        args.add('--start-fullscreen');
+        args.add('--start-maximized');
       }
       args.add('--remote-debugging-port=9222');
 
@@ -693,12 +689,16 @@ class _LauncherHomeState extends State<LauncherHome> {
                       tooltip: 'Menu',
                       color: const Color(0xFF2A2A4E),
                       onSelected: (value) {
+                        if (value.startsWith('admin_browser:')) {
+                          final index = int.parse(value.substring('admin_browser:'.length));
+                          if (index < _availableBrowsers.length) {
+                            _openAdminBrowser(_availableBrowsers[index]);
+                          }
+                          return;
+                        }
                         switch (value) {
                           case 'settings':
                             _showSettingsDialog();
-                            break;
-                          case 'admin_browser':
-                            _openAdminBrowser();
                             break;
                           case 'about':
                             _showAboutDialog();
@@ -718,16 +718,18 @@ class _LauncherHomeState extends State<LauncherHome> {
                             ],
                           ),
                         ),
-                        const PopupMenuItem(
-                          value: 'admin_browser',
-                          child: Row(
-                            children: [
-                              Icon(Icons.admin_panel_settings, color: Colors.white70),
-                              SizedBox(width: 12),
-                              Text('Administer Browser'),
-                            ],
+                        // Dynamic browser admin items
+                        for (var i = 0; i < _availableBrowsers.length; i++)
+                          PopupMenuItem(
+                            value: 'admin_browser:$i',
+                            child: Row(
+                              children: [
+                                const Icon(Icons.admin_panel_settings, color: Colors.white70),
+                                const SizedBox(width: 12),
+                                Text('Administer ${_availableBrowsers[i].executable}'),
+                              ],
+                            ),
                           ),
-                        ),
                         const PopupMenuDivider(),
                         const PopupMenuItem(
                           value: 'about',

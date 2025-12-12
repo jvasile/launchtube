@@ -70,6 +70,9 @@
         box.appendChild(buttons);
         confirmationElement.appendChild(box);
         document.body.appendChild(confirmationElement);
+        confirmationElement.addEventListener('click', (e) => {
+            if (e.target === confirmationElement) hideExitConfirmation();
+        });
         document.addEventListener('keydown', handleConfirmKeydown, true);
     }
 

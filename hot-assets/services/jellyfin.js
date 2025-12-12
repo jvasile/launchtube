@@ -297,6 +297,13 @@
         cancelBtn.addEventListener('click', hideExitConfirmation);
         exitBtn.addEventListener('click', doExit);
 
+        // Click outside dialog to dismiss
+        confirmationElement.addEventListener('click', (e) => {
+            if (e.target === confirmationElement) {
+                hideExitConfirmation();
+            }
+        });
+
         // Also handle keyboard in confirmation dialog
         document.addEventListener('keydown', handleConfirmKeydown, true);
     }

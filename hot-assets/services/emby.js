@@ -279,6 +279,9 @@
             </div>
         `;
         document.body.appendChild(confirmationElement);
+        confirmationElement.addEventListener('click', (e) => {
+            if (e.target === confirmationElement) hideExitConfirmation();
+        });
 
         const cancelBtn = confirmationElement.querySelector('.btn-cancel');
         const exitBtn = confirmationElement.querySelector('.btn-exit');

@@ -16,6 +16,7 @@
     'use strict';
 
     const PORTS = [8765, 8766, 8767, 8768, 8769];
+    let detectedPort = null;
 
     // Compatibility wrapper for GM.xmlHttpRequest (Greasemonkey 4+) and GM_xmlhttpRequest (Tampermonkey)
     function gmFetch(options) {
@@ -109,10 +110,22 @@
         console.log('Launch Tube: Loader running on', location.hostname);
 
         // Listen for close tab requests from page scripts
-        window.addEventListener('message', (e) => {
+        window.addEventListener('message', async (e) => {
             if (e.data?.type === 'launchtube-close-tab') {
                 console.log('Launch Tube: Close tab requested');
-                console.log('Launch Tube: GM_closeTab type:', typeof GM_closeTab);
+                // Call server to close browser (using gmFetch to bypass mixed content blocking)
+                if (detectedPort) {
+                    try {
+                        await gmFetch({
+                            method: 'POST',
+                            url: `http://localhost:${detectedPort}/api/1/browser/close`,
+                        });
+                        console.log('Launch Tube: Browser close request sent');
+                    } catch (err) {
+                        console.log('Launch Tube: Browser close request failed:', err);
+                    }
+                }
+                // Then close the tab
                 if (typeof GM_closeTab === 'function') {
                     try {
                         GM_closeTab();
@@ -136,6 +149,7 @@
             console.log('Launch Tube: Server not found on ports', PORTS.join(', '));
             return;
         }
+        detectedPort = port;
         console.log('Launch Tube: Found server on port', port);
 
         // Announce to setup page that we're working

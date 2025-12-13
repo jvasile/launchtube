@@ -13,6 +13,7 @@ class ExternalPlayer {
   String _ipcPath = '/tmp/launchtube-mpv.sock';
   String _ipcPipeName = 'launchtube-mpv';  // Windows named pipe name
   String _mpvPath = 'mpv'; // configurable mpv executable
+  String _mpvOptions = ''; // additional command-line options
 
   double _position = 0;
   double _duration = 0;
@@ -33,6 +34,10 @@ class ExternalPlayer {
 
   void setMpvPath(String path) {
     _mpvPath = path;
+  }
+
+  void setMpvOptions(String options) {
+    _mpvOptions = options;
   }
 
   bool get isPlaying => _process != null;
@@ -79,6 +84,11 @@ class ExternalPlayer {
 
     if (title != null) {
       args.add('--title=$title');
+    }
+
+    // Add custom mpv options
+    if (_mpvOptions.isNotEmpty) {
+      args.addAll(_mpvOptions.split(RegExp(r'\s+')).where((s) => s.isNotEmpty));
     }
 
     args.add(url);
@@ -156,6 +166,11 @@ class ExternalPlayer {
 
     if (startPosition > 0) {
       args.add('--start=${startPosition.toStringAsFixed(1)}');
+    }
+
+    // Add custom mpv options
+    if (_mpvOptions.isNotEmpty) {
+      args.addAll(_mpvOptions.split(RegExp(r'\s+')).where((s) => s.isNotEmpty));
     }
 
     // Add all URLs

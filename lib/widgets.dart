@@ -52,6 +52,7 @@ class _LauncherHomeState extends State<LauncherHome> {
   // Mpv selection
   List<String> _availableMpv = [];
   String? _selectedMpv; // executable path or name
+  String _mpvOptions = ''; // additional mpv command-line options
 
   // Track launched browser process for closing
   Process? _browserProcess;
@@ -83,33 +84,48 @@ class _LauncherHomeState extends State<LauncherHome> {
     });
   }
 
-  Future<String> get _browserConfigPath async {
+  Future<String> get _settingsPath async {
     final directory = await getApplicationSupportDirectory();
-    return '${directory.path}/browser.txt';
+    return '${directory.path}/settings.json';
+  }
+
+  Future<Map<String, dynamic>> _loadSettings() async {
+    try {
+      final path = await _settingsPath;
+      final file = File(path);
+      if (await file.exists()) {
+        final contents = await file.readAsString();
+        return json.decode(contents) as Map<String, dynamic>;
+      }
+    } catch (_) {}
+    return {};
+  }
+
+  Future<void> _saveSettings() async {
+    try {
+      final path = await _settingsPath;
+      final settings = {
+        'browser': _selectedBrowser,
+        'mpvPath': _selectedMpv,
+        'mpvOptions': _mpvOptions,
+      };
+      await File(path).writeAsString(json.encode(settings));
+    } catch (_) {}
   }
 
   Future<String?> _loadSelectedBrowser() async {
-    try {
-      final path = await _browserConfigPath;
-      final file = File(path);
-      if (await file.exists()) {
-        return (await file.readAsString()).trim();
-      }
-    } catch (_) {}
-    return null;
+    final settings = await _loadSettings();
+    return settings['browser'] as String?;
   }
 
   Future<void> _saveSelectedBrowser() async {
-    if (_selectedBrowser == null) return;
-    try {
-      final path = await _browserConfigPath;
-      await File(path).writeAsString(_selectedBrowser!);
-    } catch (_) {}
+    await _saveSettings();
   }
 
   Future<void> _detectMpv() async {
     final mpvList = await detectMpvExecutables();
     final savedMpv = await _loadSelectedMpv();
+    final savedMpvOptions = await _loadMpvOptions();
     setState(() {
       _availableMpv = mpvList;
       // Use saved mpv if set, otherwise first detected
@@ -118,37 +134,37 @@ class _LauncherHomeState extends State<LauncherHome> {
       } else if (mpvList.isNotEmpty) {
         _selectedMpv = mpvList.first;
       }
+      _mpvOptions = savedMpvOptions;
     });
-    // Update the ExternalPlayer with the selected mpv
+    // Update the ExternalPlayer with the selected mpv and options
+    if (_selectedMpv != null) {
+      ExternalPlayer.getInstance().setMpvPath(_selectedMpv!);
+    }
+    ExternalPlayer.getInstance().setMpvOptions(_mpvOptions);
+  }
+
+  Future<String?> _loadSelectedMpv() async {
+    final settings = await _loadSettings();
+    return settings['mpvPath'] as String?;
+  }
+
+  Future<String> _loadMpvOptions() async {
+    final settings = await _loadSettings();
+    return (settings['mpvOptions'] as String?) ?? '';
+  }
+
+  Future<void> _saveSelectedMpv() async {
+    await _saveSettings();
+    // Update the ExternalPlayer with the new mpv path
     if (_selectedMpv != null) {
       ExternalPlayer.getInstance().setMpvPath(_selectedMpv!);
     }
   }
 
-  Future<String> get _mpvConfigPath async {
-    final directory = await getApplicationSupportDirectory();
-    return '${directory.path}/mpv.txt';
-  }
-
-  Future<String?> _loadSelectedMpv() async {
-    try {
-      final path = await _mpvConfigPath;
-      final file = File(path);
-      if (await file.exists()) {
-        return (await file.readAsString()).trim();
-      }
-    } catch (_) {}
-    return null;
-  }
-
-  Future<void> _saveSelectedMpv() async {
-    if (_selectedMpv == null) return;
-    try {
-      final path = await _mpvConfigPath;
-      await File(path).writeAsString(_selectedMpv!);
-    } catch (_) {}
-    // Update the ExternalPlayer with the new mpv path
-    ExternalPlayer.getInstance().setMpvPath(_selectedMpv!);
+  Future<void> _saveMpvOptions() async {
+    await _saveSettings();
+    // Update the ExternalPlayer with the new mpv options
+    ExternalPlayer.getInstance().setMpvOptions(_mpvOptions);
   }
 
   @override
@@ -754,6 +770,7 @@ class _LauncherHomeState extends State<LauncherHome> {
         selectedBrowser: _selectedBrowser,
         availableMpv: _availableMpv,
         selectedMpv: _selectedMpv,
+        mpvOptions: _mpvOptions,
         onBrowserChanged: (value) {
           setState(() {
             _selectedBrowser = value;
@@ -765,6 +782,12 @@ class _LauncherHomeState extends State<LauncherHome> {
             _selectedMpv = value;
           });
           _saveSelectedMpv();
+        },
+        onMpvOptionsChanged: (value) {
+          setState(() {
+            _mpvOptions = value;
+          });
+          _saveMpvOptions();
         },
       ),
     );
@@ -1240,8 +1263,10 @@ class SettingsDialog extends StatefulWidget {
   final String? selectedBrowser;
   final List<String> availableMpv;
   final String? selectedMpv;
+  final String mpvOptions;
   final Function(String?) onBrowserChanged;
   final Function(String?) onMpvChanged;
+  final Function(String) onMpvOptionsChanged;
 
   const SettingsDialog({
     super.key,
@@ -1249,8 +1274,10 @@ class SettingsDialog extends StatefulWidget {
     required this.selectedBrowser,
     required this.availableMpv,
     required this.selectedMpv,
+    required this.mpvOptions,
     required this.onBrowserChanged,
     required this.onMpvChanged,
+    required this.onMpvOptionsChanged,
   });
 
   @override
@@ -1261,6 +1288,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
   late String? _selectedBrowser;
   late String? _selectedMpv;
   late TextEditingController _mpvCustomController;
+  late TextEditingController _mpvOptionsController;
   bool _useCustomMpv = false;
 
   @override
@@ -1274,11 +1302,15 @@ class _SettingsDialogState extends State<SettingsDialog> {
     _mpvCustomController = TextEditingController(
       text: _useCustomMpv ? widget.selectedMpv : '',
     );
+    _mpvOptionsController = TextEditingController(
+      text: widget.mpvOptions,
+    );
   }
 
   @override
   void dispose() {
     _mpvCustomController.dispose();
+    _mpvOptionsController.dispose();
     super.dispose();
   }
 
@@ -1396,6 +1428,37 @@ class _SettingsDialogState extends State<SettingsDialog> {
                     },
                   ),
                 ),
+
+              const SizedBox(height: 16),
+
+              // Mpv options section
+              const Text(
+                'MPV Options',
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Additional command-line options for mpv:',
+                style: TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _mpvOptionsController,
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  hintText: '--hwdec=auto --volume=80',
+                  hintStyle: TextStyle(color: Colors.white38),
+                  enabledBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: Colors.white38),
+                  ),
+                  focusedBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: Colors.blue),
+                  ),
+                ),
+                onChanged: (value) {
+                  widget.onMpvOptionsChanged(value);
+                },
+              ),
             ],
           ),
         ),

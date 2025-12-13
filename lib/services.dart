@@ -221,6 +221,124 @@ class ServiceDataStore {
   }
 }
 
+// Profile management for multi-user support
+class ProfileManager {
+  static String get _profilesPath => '$_appSupportDir/profiles.json';
+  static String get _profilesDir => '$_appSupportDir/profiles';
+
+  /// Load all user profiles from profiles.json
+  static Future<List<UserProfile>> loadProfiles() async {
+    await initAppSupportDir(); // Ensure _appSupportDir is initialized
+    final file = File(_profilesPath);
+    if (!await file.exists()) {
+      return [];
+    }
+    try {
+      final contents = await file.readAsString();
+      final decoded = jsonDecode(contents) as List<dynamic>;
+      return decoded.map((e) => UserProfile.fromJson(e as Map<String, dynamic>)).toList();
+    } catch (e) {
+      debugPrint('Failed to load profiles: $e');
+      return [];
+    }
+  }
+
+  /// Save all user profiles to profiles.json
+  static Future<void> saveProfiles(List<UserProfile> profiles) async {
+    await initAppSupportDir();
+    final file = File(_profilesPath);
+    final json = profiles.map((p) => p.toJson()).toList();
+    await file.writeAsString(jsonEncode(json));
+  }
+
+  /// Create a new profile and its directory structure
+  static Future<UserProfile> createProfile(String displayName, int colorValue) async {
+    await initAppSupportDir();
+
+    // Generate unique ID from display name
+    var id = UserProfile.sanitizeId(displayName);
+    if (id.isEmpty) id = 'user';
+
+    // Ensure uniqueness by appending number if needed
+    final profiles = await loadProfiles();
+    final existingIds = profiles.map((p) => p.id).toSet();
+    var uniqueId = id;
+    var counter = 1;
+    while (existingIds.contains(uniqueId)) {
+      uniqueId = '${id}_$counter';
+      counter++;
+    }
+
+    final profile = UserProfile(
+      id: uniqueId,
+      displayName: displayName,
+      colorValue: colorValue,
+    );
+
+    // Create profile directory
+    final profileDir = Directory(getProfileDirectory(profile));
+    if (!await profileDir.exists()) {
+      await profileDir.create(recursive: true);
+    }
+
+    // Save updated profiles list
+    profiles.add(profile);
+    await saveProfiles(profiles);
+
+    return profile;
+  }
+
+  /// Delete a profile and optionally its directory
+  static Future<void> deleteProfile(String id, {bool deleteFiles = true}) async {
+    await initAppSupportDir();
+    final profiles = await loadProfiles();
+    profiles.removeWhere((p) => p.id == id);
+    await saveProfiles(profiles);
+
+    if (deleteFiles) {
+      final profileDir = Directory('$_profilesDir/$id');
+      if (await profileDir.exists()) {
+        await profileDir.delete(recursive: true);
+      }
+    }
+  }
+
+  /// Get the profile directory path
+  static String getProfileDirectory(UserProfile profile) {
+    return '$_profilesDir/${profile.id}';
+  }
+
+  /// Get the browser profile path for Chrome's --user-data-dir
+  static String getBrowserProfilePath(UserProfile profile) {
+    return '${getProfileDirectory(profile)}/chrome';
+  }
+
+  /// Get the apps.json path for a profile
+  static String getAppsPath(UserProfile profile) {
+    return '${getProfileDirectory(profile)}/apps.json';
+  }
+
+  /// Check if there's an existing apps.json that needs migration
+  static Future<bool> hasLegacyApps() async {
+    await initAppSupportDir();
+    final oldAppsFile = File('$_appSupportDir/apps.json');
+    return await oldAppsFile.exists();
+  }
+
+  /// Migrate existing apps.json to a profile
+  static Future<void> migrateLegacyApps(UserProfile profile) async {
+    await initAppSupportDir();
+    final oldAppsFile = File('$_appSupportDir/apps.json');
+    if (await oldAppsFile.exists()) {
+      final newAppsPath = getAppsPath(profile);
+      await oldAppsFile.copy(newAppsPath);
+      // Remove old file after successful migration
+      await oldAppsFile.delete();
+      Log.write('Migrated apps.json to profile: ${profile.id}');
+    }
+  }
+}
+
 // Data directory for runtime assets
 String? _cachedAssetDir;
 String? _appSupportDir;

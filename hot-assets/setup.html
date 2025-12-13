@@ -217,47 +217,16 @@
             }
         });
 
-        // Install userscript manager and poll for detection
-        async function installUserscriptManager() {
-            document.getElementById('step1-status').className = 'status checking';
-            document.getElementById('step1-status').textContent = 'Opening extension store...';
-
-            // Detect browser and open appropriate extension store
+        // Install userscript manager - navigate directly to avoid popup blocker
+        function installUserscriptManager() {
+            // Detect browser and navigate to appropriate extension store
             const isFirefox = navigator.userAgent.toLowerCase().includes('firefox');
             const storeUrl = isFirefox
                 ? 'https://addons.mozilla.org/firefox/addon/tampermonkey/'
                 : 'https://chrome.google.com/webstore/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo';
 
-            window.open(storeUrl, '_blank', 'width=800,height=600');
-
-            document.getElementById('step1-status').textContent = 'Install Tampermonkey from the popup, then wait...';
-            document.getElementById('step1-install').innerHTML = '<p style="opacity: 0.7;">Checking for installation...</p>';
-            document.getElementById('step1-install').classList.remove('hidden');
-
-            // Poll for extension detection
-            const pollInterval = setInterval(async () => {
-                const manager = await detectUserscriptManager();
-                if (manager) {
-                    clearInterval(pollInterval);
-                    console.log('LaunchTube: Userscript manager now detected: ' + manager);
-
-                    // Mark step 1 complete
-                    document.getElementById('step1').classList.add('complete');
-                    document.getElementById('step1-status').className = 'status success';
-                    document.getElementById('step1-status').textContent = manager + ' detected!';
-                    document.getElementById('step1-install').classList.add('hidden');
-
-                    // Proceed to step 2: install loader and go to target
-                    document.getElementById('step2-status').className = 'status checking';
-                    document.getElementById('step2-status').textContent = 'Installing loader script...';
-
-                    window.open('/launchtube-loader.user.js', '_blank', 'width=800,height=600');
-                    setTimeout(() => {
-                        // Open target in this window - makes window.close() work later
-                    window.open(targetUrl, '_self');
-                    }, 500);
-                }
-            }, 2000);
+            // Navigate directly - use back button or re-launch app after installing
+            window.location.href = storeUrl;
         }
 
         // Listen for loader script to announce itself (means BOTH are working)

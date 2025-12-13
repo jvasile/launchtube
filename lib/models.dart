@@ -150,6 +150,52 @@ class PlaylistItem {
   PlaylistItem({required this.url, this.itemId, this.onComplete});
 }
 
+// User profile for multi-user support
+class UserProfile {
+  final String id;           // Unique identifier (folder name, sanitized)
+  final String displayName;  // Name shown in UI
+  final int colorValue;      // Avatar/tile color
+
+  const UserProfile({
+    required this.id,
+    required this.displayName,
+    required this.colorValue,
+  });
+
+  Color get color => Color(colorValue);
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'displayName': displayName,
+    'colorValue': colorValue,
+  };
+
+  factory UserProfile.fromJson(Map<String, dynamic> json) => UserProfile(
+    id: json['id'] as String,
+    displayName: json['displayName'] as String,
+    colorValue: json['colorValue'] as int,
+  );
+
+  UserProfile copyWith({
+    String? id,
+    String? displayName,
+    int? colorValue,
+  }) => UserProfile(
+    id: id ?? this.id,
+    displayName: displayName ?? this.displayName,
+    colorValue: colorValue ?? this.colorValue,
+  );
+
+  /// Sanitize a display name to create a valid folder name
+  static String sanitizeId(String name) {
+    return name
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]'), '_')
+        .replaceAll(RegExp(r'_+'), '_')
+        .replaceAll(RegExp(r'^_|_$'), '');
+  }
+}
+
 // Available colors for app tiles
 final List<Color> availableColors = [
   const Color(0xFF000000), // Black

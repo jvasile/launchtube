@@ -37,13 +37,19 @@ class LauncherHome extends StatefulWidget {
   State<LauncherHome> createState() => _LauncherHomeState();
 }
 
-class _LauncherHomeState extends State<LauncherHome> {
+class _LauncherHomeState extends State<LauncherHome> with WidgetsBindingObserver {
   List<AppConfig> apps = [];
   int _selectedIndex = 0;
   bool _moveMode = false;
   int? _moveFromIndex;
   final FocusNode _focusNode = FocusNode();
   final LaunchTubeServer _server = LaunchTubeServer();
+
+  // User profiles
+  List<UserProfile> _profiles = [];
+  UserProfile? _currentProfile;
+  bool _showingUserSelection = false;
+  int _userSelectedIndex = 0;
 
   // Browser selection
   List<BrowserInfo> _availableBrowsers = [];
@@ -61,13 +67,374 @@ class _LauncherHomeState extends State<LauncherHome> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _enterFullscreen();
-    _loadApps();
+    _initializeProfiles();
     _detectBrowsers();
     _detectMpv();
     _server.setAppsProvider(() => apps);
     _server.setCloseBrowserCallback(_closeBrowser);
     _server.start();
+  }
+
+  Future<void> _initializeProfiles() async {
+    // Load profiles
+    final profiles = await ProfileManager.loadProfiles();
+
+    if (profiles.isEmpty) {
+      // First run - show user creation dialog
+      setState(() {
+        _profiles = [];
+        _currentProfile = null;
+        _showingUserSelection = true;
+      });
+      // Show the add user dialog for first-time setup
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _showFirstRunUserDialog();
+      });
+    } else if (profiles.length == 1) {
+      // Single user - skip selection, go straight to apps
+      setState(() {
+        _profiles = profiles;
+        _currentProfile = profiles.first;
+        _showingUserSelection = false;
+      });
+      await _loadApps();
+    } else {
+      // Multiple users - show selection screen
+      setState(() {
+        _profiles = profiles;
+        _currentProfile = null;
+        _showingUserSelection = true;
+      });
+    }
+  }
+
+  void _selectProfile(UserProfile profile) {
+    setState(() {
+      _currentProfile = profile;
+      _showingUserSelection = false;
+      _selectedIndex = 0;
+    });
+    _loadApps();
+  }
+
+  void _showUserSelection() {
+    setState(() {
+      _showingUserSelection = true;
+      _userSelectedIndex = _profiles.indexWhere((p) => p.id == _currentProfile?.id);
+      if (_userSelectedIndex < 0) _userSelectedIndex = 0;
+    });
+  }
+
+  void _handleUserSelectionKeyEvent(KeyEvent event) {
+    setState(() {
+      final totalItems = _profiles.length + 1; // +1 for "Add User" tile
+      const int columns = 4;
+
+      if (event.logicalKey == LogicalKeyboardKey.escape) {
+        // If we have a current profile, go back to app grid
+        if (_currentProfile != null) {
+          _showingUserSelection = false;
+        }
+        return;
+      }
+
+      if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+        _userSelectedIndex = (_userSelectedIndex + 1) % totalItems;
+      } else if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+        _userSelectedIndex = (_userSelectedIndex - 1 + totalItems) % totalItems;
+      } else if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+        _userSelectedIndex = (_userSelectedIndex + columns) % totalItems;
+      } else if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+        _userSelectedIndex = (_userSelectedIndex - columns + totalItems) % totalItems;
+      } else if (event.logicalKey == LogicalKeyboardKey.enter ||
+          event.logicalKey == LogicalKeyboardKey.select) {
+        if (_userSelectedIndex < _profiles.length) {
+          _selectProfile(_profiles[_userSelectedIndex]);
+        } else {
+          _showAddUserDialog();
+        }
+      } else if (event.logicalKey == LogicalKeyboardKey.keyC) {
+        // Edit user (like 'C' for configure on app tiles)
+        if (_userSelectedIndex < _profiles.length) {
+          _showEditUserDialog(_userSelectedIndex);
+        }
+      }
+    });
+  }
+
+  void _showAddUserDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => _UserDialog(
+        isNewUser: true,
+        onSave: (name, colorValue) async {
+          final profile = await ProfileManager.createProfile(name, colorValue);
+          setState(() {
+            _profiles.add(profile);
+            _userSelectedIndex = _profiles.length - 1;
+          });
+        },
+      ),
+    );
+  }
+
+  void _showFirstRunUserDialog() {
+    final nameController = TextEditingController();
+    Color selectedColor = availableColors[Random().nextInt(availableColors.length)];
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: const Color(0xFF2A2A4E),
+          title: const Text('Welcome to Launch Tube!', style: TextStyle(color: Colors.white)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Create your profile to get started.',
+                style: TextStyle(color: Colors.white70),
+              ),
+              const SizedBox(height: 20),
+              TextField(
+                controller: nameController,
+                autofocus: true,
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  labelText: 'Your Name',
+                  labelStyle: TextStyle(color: Colors.white70),
+                  enabledBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: Colors.white38),
+                  ),
+                  focusedBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: Colors.blue),
+                  ),
+                ),
+                onSubmitted: (_) async {
+                  final name = nameController.text.trim();
+                  if (name.isEmpty) return;
+                  Navigator.pop(context);
+                  await _createFirstProfile(name, selectedColor.value);
+                },
+              ),
+              const SizedBox(height: 24),
+              const Text('Pick a color', style: TextStyle(color: Colors.white70)),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: availableColors.map((color) {
+                  final isSelected = selectedColor.value == color.value;
+                  return GestureDetector(
+                    onTap: () => setDialogState(() => selectedColor = color),
+                    child: Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: color,
+                        borderRadius: BorderRadius.circular(20),
+                        border: isSelected
+                            ? Border.all(color: Colors.white, width: 3)
+                            : null,
+                      ),
+                      child: isSelected
+                          ? Icon(Icons.check,
+                              color: color.computeLuminance() > 0.5
+                                  ? Colors.black
+                                  : Colors.white,
+                              size: 20)
+                          : null,
+                    ),
+                  );
+                }).toList(),
+              ),
+            ],
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () async {
+                final name = nameController.text.trim();
+                if (name.isEmpty) return;
+                Navigator.pop(context);
+                await _createFirstProfile(name, selectedColor.value);
+              },
+              child: const Text('Get Started'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _createFirstProfile(String name, int colorValue) async {
+    final profile = await ProfileManager.createProfile(name, colorValue);
+
+    // Migrate legacy apps.json if it exists
+    await ProfileManager.migrateLegacyApps(profile);
+
+    setState(() {
+      _profiles = [profile];
+      _currentProfile = profile;
+      _showingUserSelection = false;
+    });
+    await _loadApps();
+  }
+
+  void _showEditUserDialog(int index) {
+    final profile = _profiles[index];
+    showDialog(
+      context: context,
+      builder: (context) => _UserDialog(
+        isNewUser: false,
+        initialName: profile.displayName,
+        initialColorValue: profile.colorValue,
+        canDelete: _profiles.length > 1,
+        onSave: (name, colorValue) async {
+          // Update profile
+          final updatedProfile = profile.copyWith(
+            displayName: name,
+            colorValue: colorValue,
+          );
+
+          // Save to disk
+          final profiles = await ProfileManager.loadProfiles();
+          final profileIndex = profiles.indexWhere((p) => p.id == profile.id);
+          if (profileIndex >= 0) {
+            profiles[profileIndex] = updatedProfile;
+            await ProfileManager.saveProfiles(profiles);
+          }
+
+          setState(() {
+            _profiles[index] = updatedProfile;
+            // Update current profile if it's the one being edited
+            if (_currentProfile?.id == profile.id) {
+              _currentProfile = updatedProfile;
+            }
+          });
+        },
+        onDelete: () async {
+          await ProfileManager.deleteProfile(profile.id);
+          setState(() {
+            _profiles.removeAt(index);
+            if (_userSelectedIndex >= _profiles.length) {
+              _userSelectedIndex = _profiles.length; // Points to "Add User"
+            }
+            // If we deleted the current profile, clear it
+            if (_currentProfile?.id == profile.id) {
+              _currentProfile = null;
+            }
+          });
+        },
+      ),
+    );
+  }
+
+  Widget _buildUserSelectionScreen() {
+    // During first run, show minimal UI while dialog is open
+    if (_profiles.isEmpty) {
+      return Column(
+        children: [
+          const SizedBox(height: 40),
+          Center(
+            child: Image.file(
+              File('${getAssetDirectory()}/images/launch-tube-logo/logo_wide.png'),
+              height: 100,
+            ),
+          ),
+          const Spacer(),
+          const Spacer(),
+        ],
+      );
+    }
+
+    return Column(
+      children: [
+        const SizedBox(height: 40),
+        Center(
+          child: Image.file(
+            File('${getAssetDirectory()}/images/launch-tube-logo/logo_wide.png'),
+            height: 100,
+          ),
+        ),
+        const SizedBox(height: 40),
+        const Text(
+          'Who\'s watching?',
+          style: TextStyle(
+            fontSize: 32,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
+        ),
+        const Spacer(),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final screenWidth = MediaQuery.of(context).size.width;
+            final horizontalPadding = screenWidth * 0.15;
+            const crossAxisCount = 4;
+            final spacing = screenWidth * 0.02;
+
+            return Padding(
+              padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final itemWidth =
+                      (constraints.maxWidth - (spacing * (crossAxisCount - 1))) /
+                          crossAxisCount;
+                  final itemHeight = itemWidth * 1.2; // Taller tiles for profiles
+
+                  return Wrap(
+                    spacing: spacing,
+                    runSpacing: spacing,
+                    children: [
+                      // User profile tiles
+                      ...List.generate(_profiles.length, (index) {
+                        final profile = _profiles[index];
+                        final isSelected = _userSelectedIndex == index;
+                        return SizedBox(
+                          width: itemWidth,
+                          height: itemHeight,
+                          child: _UserTile(
+                            profile: profile,
+                            isSelected: isSelected,
+                            onTap: () => _selectProfile(profile),
+                            onHover: (hovering) {
+                              if (hovering) {
+                                setState(() => _userSelectedIndex = index);
+                              }
+                            },
+                            onEdit: () => _showEditUserDialog(index),
+                          ),
+                        );
+                      }),
+                      // Add User tile
+                      SizedBox(
+                        width: itemWidth,
+                        height: itemHeight,
+                        child: _AddUserTile(
+                          isSelected: _userSelectedIndex == _profiles.length,
+                          onTap: _showAddUserDialog,
+                          onHover: (hovering) {
+                            if (hovering) {
+                              setState(() => _userSelectedIndex = _profiles.length);
+                            }
+                          },
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              ),
+            );
+          },
+        ),
+        const Spacer(),
+        const SizedBox(height: 40),
+      ],
+    );
   }
 
   Future<void> _detectBrowsers() async {
@@ -169,12 +536,25 @@ class _LauncherHomeState extends State<LauncherHome> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _server.stop();
     _focusNode.dispose();
     super.dispose();
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // App received focus - close any launched browser
+      _closeBrowser();
+    }
+  }
+
   Future<String> get _configPath async {
+    if (_currentProfile != null) {
+      return ProfileManager.getAppsPath(_currentProfile!);
+    }
+    // Fallback for migration/initial state
     final directory = await getApplicationSupportDirectory();
     return '${directory.path}/apps.json';
   }
@@ -286,42 +666,53 @@ class _LauncherHomeState extends State<LauncherHome> {
 
     try {
       if (app.type == AppType.website) {
-        // Find a browser that isn't already running
-        BrowserInfo? selectedBrowser;
-        List<String> runningBrowsers = [];
-        Set<String> seenNames = {};
-
-        for (final browser in _availableBrowsers) {
-          if (await _isBrowserRunning(browser.executable)) {
-            if (!seenNames.contains(browser.name)) {
-              runningBrowsers.add(browser.name);
-              seenNames.add(browser.name);
-            }
-          } else if (selectedBrowser == null) {
-            selectedBrowser = browser;
-          }
-        }
+        // Find the BrowserInfo for the selected browser
+        final selectedBrowser = _availableBrowsers.where(
+          (b) => b.executable == _selectedBrowser
+        ).firstOrNull;
 
         if (selectedBrowser == null) {
-          _showBrowserError(runningBrowsers);
+          _showBrowserError(['No browser configured']);
           return;
         }
 
-        if (runningBrowsers.isNotEmpty) {
-          _showBrowserWarning(runningBrowsers, selectedBrowser.name);
+        // For Firefox, check if an external instance is running (Firefox can't share profiles)
+        // For Chrome/Chromium with profiles, skip the check - multiple instances can coexist
+        if (selectedBrowser.name == 'Firefox') {
+          if (await _isBrowserRunning(selectedBrowser.executable)) {
+            _showBrowserError([selectedBrowser.name]);
+            return;
+          }
         }
 
         // Build args - always fullscreen
         final args = <String>[];
         args.add(selectedBrowser.fullscreenFlag);
 
+        // Add user-data-dir for Chrome/Chromium profile isolation
+        if (_currentProfile != null && selectedBrowser.name != 'Firefox') {
+          final profilePath = ProfileManager.getBrowserProfilePath(_currentProfile!);
+          args.add('--user-data-dir=$profilePath');
+        }
+
+        // Add LaunchTube extension for script injection (Chrome/Chromium only)
+        if (selectedBrowser.name != 'Firefox') {
+          final extensionPath = '${getAssetDirectory()}/extensions/launchtube';
+          args.add('--load-extension=$extensionPath');
+        }
+
         // Add remote debugging port for server-side extension detection
         const debugPort = 9222;
         args.add('--remote-debugging-port=$debugPort');
 
-        // Start with setup page that checks for userscript manager, then redirects to target
-        final setupUrl = 'http://localhost:${_server.port}/setup?target=${Uri.encodeComponent(app.url!)}';
-        args.add(setupUrl);
+        // For Chrome/Chromium with our extension, go directly to target URL
+        // For Firefox (no extension), use setup page
+        if (selectedBrowser.name == 'Firefox') {
+          final setupUrl = 'http://localhost:${_server.port}/setup?target=${Uri.encodeComponent(app.url!)}';
+          args.add(setupUrl);
+        } else {
+          args.add(app.url!);
+        }
 
         Log.write('Launching browser: ${selectedBrowser.executable} ${args.join(' ')}');
         _launchedBrowser = selectedBrowser;
@@ -445,6 +836,14 @@ class _LauncherHomeState extends State<LauncherHome> {
       // Use --start-maximized for Chrome/Chromium admin mode, nothing for Firefox (no equivalent)
       if (selectedBrowser.name != 'Firefox') {
         args.add('--start-maximized');
+        // Add user-data-dir for Chrome/Chromium profile isolation
+        if (_currentProfile != null) {
+          final profilePath = ProfileManager.getBrowserProfilePath(_currentProfile!);
+          args.add('--user-data-dir=$profilePath');
+        }
+        // Add LaunchTube extension for script injection
+        final extensionPath = '${getAssetDirectory()}/extensions/launchtube';
+        args.add('--load-extension=$extensionPath');
       }
       args.add('--remote-debugging-port=9222');
 
@@ -495,6 +894,12 @@ class _LauncherHomeState extends State<LauncherHome> {
         return;
       }
 
+      // Handle user selection screen
+      if (_showingUserSelection) {
+        _handleUserSelectionKeyEvent(event);
+        return;
+      }
+
       setState(() {
         final totalItems = apps.length + 1; // +1 for add button
         const int columns = 4;
@@ -506,6 +911,12 @@ class _LauncherHomeState extends State<LauncherHome> {
             _selectedIndex = _moveFromIndex!;
             _moveFromIndex = null;
           }
+          return;
+        }
+
+        // U key to switch user
+        if (event.logicalKey == LogicalKeyboardKey.keyU && !_moveMode) {
+          _showUserSelection();
           return;
         }
 
@@ -615,6 +1026,7 @@ class _LauncherHomeState extends State<LauncherHome> {
               _HelpRow(shortcut: 'C', description: 'Configure app'),
               _HelpRow(shortcut: 'M', description: 'Move app'),
               _HelpRow(shortcut: 'Delete', description: 'Delete app'),
+              _HelpRow(shortcut: 'U', description: 'Switch user'),
               _HelpRow(shortcut: 'Escape', description: 'Cancel'),
               _HelpRow(shortcut: 'Ctrl+Shift+R', description: 'Restart app'),
               _HelpRow(shortcut: 'Ctrl+Shift+Q', description: 'Quit app'),
@@ -832,7 +1244,9 @@ class _LauncherHomeState extends State<LauncherHome> {
       onKeyEvent: _handleKeyEvent,
       child: Scaffold(
         body: SafeArea(
-          child: Column(
+          child: _showingUserSelection
+              ? _buildUserSelectionScreen()
+              : Column(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               const SizedBox(height: 40),
@@ -857,6 +1271,9 @@ class _LauncherHomeState extends State<LauncherHome> {
                         switch (value) {
                           case 'settings':
                             _showSettingsDialog();
+                            break;
+                          case 'switch_user':
+                            _showUserSelection();
                             break;
                           case 'about':
                             _showAboutDialog();
@@ -888,6 +1305,18 @@ class _LauncherHomeState extends State<LauncherHome> {
                               ],
                             ),
                           ),
+                        const PopupMenuDivider(),
+                        // User management
+                        const PopupMenuItem(
+                          value: 'switch_user',
+                          child: Row(
+                            children: [
+                              Icon(Icons.switch_account, color: Colors.white70),
+                              SizedBox(width: 12),
+                              Text('Switch User'),
+                            ],
+                          ),
+                        ),
                         const PopupMenuDivider(),
                         const PopupMenuItem(
                           value: 'about',
@@ -2228,3 +2657,592 @@ class _HelpRow extends StatelessWidget {
     );
   }
 }
+
+class _UserTile extends StatefulWidget {
+  final UserProfile profile;
+  final bool isSelected;
+  final VoidCallback onTap;
+  final ValueChanged<bool> onHover;
+  final VoidCallback onEdit;
+
+  const _UserTile({
+    required this.profile,
+    required this.isSelected,
+    required this.onTap,
+    required this.onHover,
+    required this.onEdit,
+  });
+
+  @override
+  State<_UserTile> createState() => _UserTileState();
+}
+
+class _UserTileState extends State<_UserTile> {
+  bool _isHovering = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) {
+        setState(() => _isHovering = true);
+        widget.onHover(true);
+      },
+      onExit: (_) {
+        setState(() => _isHovering = false);
+        widget.onHover(false);
+      },
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+          transform: Matrix4.identity()..scale(widget.isSelected ? 1.1 : 1.0),
+          transformAlignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: widget.profile.color.withOpacity(0.3),
+            borderRadius: BorderRadius.circular(16),
+            border: widget.isSelected
+                ? Border.all(color: Colors.white, width: 4)
+                : Border.all(color: Colors.white24, width: 2),
+            boxShadow: widget.isSelected
+                ? [
+                    BoxShadow(
+                      color: widget.profile.color.withOpacity(0.5),
+                      blurRadius: 20,
+                      spreadRadius: 5,
+                    ),
+                  ]
+                : null,
+          ),
+          child: Stack(
+            children: [
+              Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      width: 80,
+                      height: 80,
+                      decoration: BoxDecoration(
+                        color: widget.profile.color,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white38, width: 2),
+                      ),
+                      child: Center(
+                        child: Text(
+                          widget.profile.displayName.isNotEmpty
+                              ? widget.profile.displayName[0].toUpperCase()
+                              : '?',
+                          style: TextStyle(
+                            fontSize: 36,
+                            fontWeight: FontWeight.bold,
+                            color: widget.profile.color.computeLuminance() > 0.5
+                                ? Colors.black
+                                : Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      widget.profile.displayName,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                      textAlign: TextAlign.center,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              // Gear icon for editing
+              if (_isHovering || widget.isSelected)
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.5),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: IconButton(
+                      icon: const Icon(Icons.settings, color: Colors.white, size: 20),
+                      onPressed: widget.onEdit,
+                      tooltip: 'Edit',
+                      padding: const EdgeInsets.all(8),
+                      constraints: const BoxConstraints(),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AddUserTile extends StatelessWidget {
+  final bool isSelected;
+  final VoidCallback onTap;
+  final ValueChanged<bool> onHover;
+
+  const _AddUserTile({
+    required this.isSelected,
+    required this.onTap,
+    required this.onHover,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => onHover(true),
+      onExit: (_) => onHover(false),
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+          transform: Matrix4.identity()..scale(isSelected ? 1.1 : 1.0),
+          transformAlignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(isSelected ? 0.2 : 0.1),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: isSelected ? Colors.white : Colors.white38,
+              width: isSelected ? 4 : 2,
+            ),
+            boxShadow: isSelected
+                ? [
+                    BoxShadow(
+                      color: Colors.white.withOpacity(0.3),
+                      blurRadius: 20,
+                      spreadRadius: 5,
+                    ),
+                  ]
+                : null,
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.2),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white38, width: 2),
+                ),
+                child: const Icon(
+                  Icons.add,
+                  size: 40,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Add User',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _UserDialog extends StatefulWidget {
+  final bool isNewUser;
+  final String? initialName;
+  final int? initialColorValue;
+  final bool canDelete;
+  final Future<void> Function(String name, int colorValue) onSave;
+  final Future<void> Function()? onDelete;
+
+  const _UserDialog({
+    required this.isNewUser,
+    this.initialName,
+    this.initialColorValue,
+    this.canDelete = false,
+    required this.onSave,
+    this.onDelete,
+  });
+
+  @override
+  State<_UserDialog> createState() => _UserDialogState();
+}
+
+class _UserDialogState extends State<_UserDialog> {
+  late final TextEditingController _nameController;
+  final _focusNode = FocusNode();
+  final _textFieldFocusNode = FocusNode();
+
+  late int _selectedColorIndex;
+  int _focusedElement = 0; // 0=name, 1-N=colors, then buttons
+  late bool _isTextFieldFocused;
+
+  // Element indices
+  int get _firstColorIndex => 1;
+  int get _lastColorIndex => availableColors.length;
+  int get _deleteIndex => widget.canDelete ? availableColors.length + 1 : -1;
+  int get _cancelIndex => availableColors.length + (widget.canDelete ? 2 : 1);
+  int get _saveIndex => availableColors.length + (widget.canDelete ? 3 : 2);
+
+  String get _title => widget.isNewUser ? 'Add User' : 'Configure User';
+  String get _saveButtonLabel => widget.isNewUser ? 'Add' : 'Save';
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(text: widget.initialName ?? '');
+
+    if (widget.initialColorValue != null) {
+      _selectedColorIndex = availableColors.indexWhere(
+        (c) => c.value == widget.initialColorValue,
+      );
+      if (_selectedColorIndex < 0) _selectedColorIndex = 0;
+    } else {
+      _selectedColorIndex = Random().nextInt(availableColors.length);
+    }
+
+    // Add User: start with text field focused for typing
+    // Configure User: start with text field highlighted but not focused
+    _isTextFieldFocused = widget.isNewUser;
+
+    _textFieldFocusNode.addListener(_onTextFieldFocusChange);
+
+    if (widget.isNewUser) {
+      // Request focus after build
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _textFieldFocusNode.requestFocus();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _focusNode.dispose();
+    _textFieldFocusNode.removeListener(_onTextFieldFocusChange);
+    _textFieldFocusNode.dispose();
+    super.dispose();
+  }
+
+  void _onTextFieldFocusChange() {
+    setState(() {
+      _isTextFieldFocused = _textFieldFocusNode.hasFocus;
+      if (_isTextFieldFocused) {
+        _focusedElement = 0;
+      }
+    });
+  }
+
+  void _doSave() {
+    final name = _nameController.text.trim();
+    if (name.isEmpty) return;
+    Navigator.pop(context);
+    widget.onSave(name, availableColors[_selectedColorIndex].value);
+  }
+
+  void _doDelete() async {
+    if (widget.onDelete == null) return;
+    Navigator.pop(context);
+    // Show confirmation
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF2A2A4E),
+        title: const Text('Delete User', style: TextStyle(color: Colors.white)),
+        content: Text(
+          'Delete "${widget.initialName}" and all their data?',
+          style: const TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      widget.onDelete!();
+    }
+  }
+
+  void _handleKeyEvent(KeyEvent event) {
+    if (event is! KeyDownEvent) return;
+
+    // If text field is focused for typing, let it handle most keys
+    if (_isTextFieldFocused) {
+      if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+        setState(() {
+          _isTextFieldFocused = false;
+          _focusedElement = _firstColorIndex;
+          _textFieldFocusNode.unfocus();
+        });
+      } else if (event.logicalKey == LogicalKeyboardKey.escape) {
+        Navigator.pop(context);
+      }
+      // Enter while typing just stays in the field - user must navigate to button
+      return;
+    }
+
+    setState(() {
+      if (event.logicalKey == LogicalKeyboardKey.escape) {
+        Navigator.pop(context);
+        return;
+      }
+
+      if (event.logicalKey == LogicalKeyboardKey.enter) {
+        if (_focusedElement == 0) {
+          // Focus the text field for editing
+          _isTextFieldFocused = true;
+          _textFieldFocusNode.requestFocus();
+        } else if (_focusedElement >= _firstColorIndex && _focusedElement <= _lastColorIndex) {
+          _selectedColorIndex = _focusedElement - _firstColorIndex;
+        } else if (_focusedElement == _deleteIndex) {
+          _doDelete();
+        } else if (_focusedElement == _cancelIndex) {
+          Navigator.pop(context);
+        } else if (_focusedElement == _saveIndex) {
+          _doSave();
+        }
+        return;
+      }
+
+      if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+        if (_focusedElement >= _firstColorIndex && _focusedElement < _lastColorIndex) {
+          _focusedElement++;
+        } else if (widget.canDelete && _focusedElement == _deleteIndex) {
+          _focusedElement = _cancelIndex;
+        } else if (_focusedElement == _cancelIndex) {
+          _focusedElement = _saveIndex;
+        }
+      } else if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+        if (_focusedElement > _firstColorIndex && _focusedElement <= _lastColorIndex) {
+          _focusedElement--;
+        } else if (_focusedElement == _saveIndex) {
+          _focusedElement = _cancelIndex;
+        } else if (_focusedElement == _cancelIndex && widget.canDelete) {
+          _focusedElement = _deleteIndex;
+        }
+      } else if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+        if (_focusedElement == 0) {
+          _focusedElement = _firstColorIndex;
+        } else if (_focusedElement >= _firstColorIndex && _focusedElement <= _lastColorIndex) {
+          final colorIndex = _focusedElement - _firstColorIndex;
+          const colorsPerRow = 7;
+          if (colorIndex + colorsPerRow < availableColors.length) {
+            _focusedElement += colorsPerRow;
+          } else {
+            _focusedElement = _saveIndex;
+          }
+        }
+      } else if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+        if (_focusedElement >= _firstColorIndex && _focusedElement <= _lastColorIndex) {
+          final colorIndex = _focusedElement - _firstColorIndex;
+          const colorsPerRow = 7;
+          if (colorIndex - colorsPerRow >= 0) {
+            _focusedElement -= colorsPerRow;
+          } else {
+            _focusedElement = 0;
+          }
+        } else if (_focusedElement == _deleteIndex || _focusedElement == _cancelIndex || _focusedElement == _saveIndex) {
+          _focusedElement = _lastColorIndex;
+        }
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return KeyboardListener(
+      focusNode: _focusNode,
+      autofocus: true,
+      onKeyEvent: _handleKeyEvent,
+      child: Dialog(
+        backgroundColor: const Color(0xFF2A2A4E),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: Container(
+          width: 400,
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                _title,
+                style: const TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 24),
+              GestureDetector(
+                onTap: () {
+                  setState(() {
+                    _focusedElement = 0;
+                    _isTextFieldFocused = true;
+                    _textFieldFocusNode.requestFocus();
+                  });
+                },
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(4),
+                    border: (_focusedElement == 0 || _isTextFieldFocused)
+                        ? Border.all(color: Colors.blue, width: 2)
+                        : null,
+                    boxShadow: _focusedElement == 0 && !_isTextFieldFocused
+                        ? [BoxShadow(color: Colors.blue.withOpacity(0.3), blurRadius: 8)]
+                        : null,
+                  ),
+                  child: TextField(
+                    controller: _nameController,
+                    focusNode: _textFieldFocusNode,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: const InputDecoration(
+                      labelText: 'Name',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 24),
+              const Text('Color', style: TextStyle(color: Colors.white70)),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: List.generate(availableColors.length, (index) {
+                  final color = availableColors[index];
+                  final isSelected = _selectedColorIndex == index;
+                  final isFocused = _focusedElement == index + _firstColorIndex;
+                  return GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        _selectedColorIndex = index;
+                        _focusedElement = index + _firstColorIndex;
+                        _isTextFieldFocused = false;
+                        _textFieldFocusNode.unfocus();
+                      });
+                    },
+                    child: Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: color,
+                        borderRadius: BorderRadius.circular(8),
+                        border: isFocused
+                            ? Border.all(color: Colors.blue, width: 3)
+                            : isSelected
+                                ? Border.all(color: Colors.white, width: 3)
+                                : Border.all(color: Colors.white24, width: 1),
+                        boxShadow: isFocused
+                            ? [BoxShadow(color: Colors.blue.withOpacity(0.5), blurRadius: 8)]
+                            : null,
+                      ),
+                      child: isSelected
+                          ? Icon(Icons.check,
+                              color: color.computeLuminance() > 0.5
+                                  ? Colors.black
+                                  : Colors.white,
+                              size: 20)
+                          : null,
+                    ),
+                  );
+                }),
+              ),
+              const SizedBox(height: 32),
+              Row(
+                children: [
+                  if (widget.canDelete)
+                    _DialogButton(
+                      label: 'Delete',
+                      isFocused: _focusedElement == _deleteIndex,
+                      isDanger: true,
+                      onTap: _doDelete,
+                    ),
+                  const Spacer(),
+                  _DialogButton(
+                    label: 'Cancel',
+                    isFocused: _focusedElement == _cancelIndex,
+                    onTap: () => Navigator.pop(context),
+                  ),
+                  const SizedBox(width: 16),
+                  _DialogButton(
+                    label: _saveButtonLabel,
+                    isFocused: _focusedElement == _saveIndex,
+                    isPrimary: true,
+                    onTap: _doSave,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DialogButton extends StatelessWidget {
+  final String label;
+  final bool isFocused;
+  final bool isPrimary;
+  final bool isDanger;
+  final VoidCallback onTap;
+
+  const _DialogButton({
+    required this.label,
+    required this.isFocused,
+    this.isPrimary = false,
+    this.isDanger = false,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+        decoration: BoxDecoration(
+          color: isPrimary ? Colors.blue : (isDanger ? Colors.red.withOpacity(0.2) : Colors.transparent),
+          borderRadius: BorderRadius.circular(4),
+          border: isFocused
+              ? Border.all(color: Colors.white, width: 2)
+              : isDanger
+                  ? Border.all(color: Colors.red.withOpacity(0.5), width: 1)
+                  : isPrimary
+                      ? null
+                      : Border.all(color: Colors.white38, width: 1),
+          boxShadow: isFocused
+              ? [BoxShadow(color: Colors.white.withOpacity(0.3), blurRadius: 8)]
+              : null,
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: isDanger ? Colors.red : Colors.white,
+            fontWeight: isFocused ? FontWeight.bold : FontWeight.normal,
+          ),
+        ),
+      ),
+    );
+  }
+}
+

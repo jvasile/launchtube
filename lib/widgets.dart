@@ -663,6 +663,7 @@ class _LauncherHomeState extends State<LauncherHome> with WidgetsBindingObserver
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    Log.write('Lifecycle: $state');
     if (state == AppLifecycleState.resumed) {
       // App received focus - close any launched browser
       _closeBrowser();

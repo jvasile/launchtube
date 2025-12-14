@@ -798,8 +798,8 @@
             elements.push({ el: nav, rect, type: 'nav' });
         });
 
-        // Menu items (profile dropdown, etc.)
-        document.querySelectorAll('a.listItem-border.emby-button:not(.hide)').forEach(item => {
+        // Menu items (profile dropdown, settings, dashboard sidebar, etc.)
+        document.querySelectorAll('a.listItem-border.emby-button:not(.hide), .navMenuOption, .sidebarLink, .mainDrawer a.navMenuOption, .listItem-button').forEach(item => {
             const rect = item.getBoundingClientRect();
             if (rect.width < 20 || rect.height < 20) return;
             const style = window.getComputedStyle(item);
@@ -1064,7 +1064,7 @@
         // Skip active tab (current page)
         if (tab && tab.classList.contains('emby-tab-button-active')) tab = null;
         const nav = event.target.closest('.headerBackButton, .headerHomeButton, .mainDrawerButton, .headerSyncButton, .headerCastButton, .headerSearchButton, .headerUserButton');
-        const menuItem = event.target.closest('a.listItem-border.emby-button');
+        const menuItem = event.target.closest('a.listItem-border.emby-button, .navMenuOption, .sidebarLink, .listItem-button');
         const alphaPicker = event.target.closest('.alphaPickerButton');
         const target = card || button || tab || nav || menuItem || alphaPicker;
 
@@ -1100,7 +1100,7 @@
 
         // On settings/menu pages, prioritize first menu item
         if (!hasAutoSelected) {
-            const menuItems = document.querySelectorAll('a.listItem-border.emby-button:not(.hide)');
+            const menuItems = document.querySelectorAll('a.listItem-border.emby-button:not(.hide), .navMenuOption, .sidebarLink, .listItem-button');
             for (const menuItem of menuItems) {
                 const rect = menuItem.getBoundingClientRect();
                 if (rect.width > 0 && rect.height > 0 && rect.top < window.innerHeight) {

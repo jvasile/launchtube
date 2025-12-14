@@ -48,3 +48,4 @@ app.*.map.json
 .claude
 CLAUDE.md
 build-windows-wsl.sh
+hot-assets/images/profile-photos/raw

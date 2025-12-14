@@ -1410,6 +1410,7 @@ class _LauncherHomeState extends State<LauncherHome> with WidgetsBindingObserver
                       icon: Icon(Icons.menu, color: _menuSelected ? Colors.white : Colors.white54),
                       tooltip: 'Menu (=)',
                       color: const Color(0xFF2A2A4E),
+                      initialValue: 'settings',
                       onCanceled: () {
                         setState(() {
                           _menuSelected = false;

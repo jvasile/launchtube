@@ -773,6 +773,10 @@
             box-shadow: inset 0 0 0 3px #00a4dc !important;
             background-color: rgba(0, 164, 220, 0.2) !important;
         }
+        .alphaPickerButton.launchtube-nav-highlight {
+            background-color: #00a4dc !important;
+            color: #fff !important;
+        }
     `;
     document.head.appendChild(navStyle);
 
@@ -827,6 +831,19 @@
             seen.add(btn);
             if (rect.top < window.innerHeight && rect.bottom > 0) {
                 elements.push({ el: btn, rect, type: 'button' });
+            }
+        });
+
+        // Alpha picker buttons (A-Z navigation on right side of grids)
+        document.querySelectorAll('.alphaPicker .alphaPickerButton').forEach(btn => {
+            const rect = btn.getBoundingClientRect();
+            if (rect.width === 0 || rect.height === 0) return;
+            const style = window.getComputedStyle(btn);
+            if (style.opacity === '0' || style.visibility === 'hidden' || style.display === 'none') return;
+            if (seen.has(btn)) return;
+            seen.add(btn);
+            if (rect.top < window.innerHeight && rect.bottom > 0) {
+                elements.push({ el: btn, rect, type: 'alpha' });
             }
         });
 
@@ -908,14 +925,17 @@
         const currentRect = selectedElement.getBoundingClientRect();
         const currentCenterX = currentRect.left + currentRect.width / 2;
         const currentCenterY = currentRect.top + currentRect.height / 2;
+        const currentIsAlpha = selectedElement.classList.contains('alphaPickerButton');
+        const currentIsCard = selectedElement.classList.contains('card');
 
         let bestElement = null;
         let bestDistance = Infinity;
 
-        navElements.forEach(({ el, rect }) => {
+        navElements.forEach(({ el, rect, type }) => {
             if (el === selectedElement) return;
             const centerX = rect.left + rect.width / 2;
             const centerY = rect.top + rect.height / 2;
+            const isAlpha = type === 'alpha';
 
             // Check vertical overlap for left/right navigation
             const hasVerticalOverlap = currentRect.top < rect.bottom && currentRect.bottom > rect.top;
@@ -923,10 +943,20 @@
             let isValidDirection = false;
             switch (direction) {
                 case 'left':
-                    isValidDirection = centerX < currentCenterX - 10 && hasVerticalOverlap;
+                    // From alpha picker, allow going left to cards without strict vertical overlap
+                    if (currentIsAlpha && !isAlpha) {
+                        isValidDirection = centerX < currentCenterX - 10;
+                    } else {
+                        isValidDirection = centerX < currentCenterX - 10 && hasVerticalOverlap;
+                    }
                     break;
                 case 'right':
-                    isValidDirection = centerX > currentCenterX + 10 && hasVerticalOverlap;
+                    // To alpha picker, allow going right without strict vertical overlap
+                    if (isAlpha && !currentIsAlpha) {
+                        isValidDirection = centerX > currentCenterX + 10;
+                    } else {
+                        isValidDirection = centerX > currentCenterX + 10 && hasVerticalOverlap;
+                    }
                     break;
                 case 'up':
                     isValidDirection = centerY < currentCenterY - 10;
@@ -940,6 +970,9 @@
                 let distance;
                 if (direction === 'up' || direction === 'down') {
                     distance = Math.abs(centerY - currentCenterY) + Math.abs(centerX - currentCenterX) * 0.1;
+                } else if ((currentIsAlpha && !isAlpha) || (isAlpha && !currentIsAlpha)) {
+                    // When navigating to/from alpha picker, prioritize vertical proximity
+                    distance = Math.abs(centerY - currentCenterY) + Math.abs(centerX - currentCenterX) * 0.5;
                 } else {
                     distance = Math.abs(centerX - currentCenterX) + Math.abs(centerY - currentCenterY) * 10;
                 }
@@ -1022,7 +1055,7 @@
         if (!mouseHasMoved) return; // Ignore until mouse actually moves
         if (Date.now() < ignoreMouseUntil) return;
 
-        // Check for card, button, tab, or navbar element
+        // Check for card, button, tab, navbar element, or alpha picker
         let card = event.target.closest('.card');
         // Skip poster card on detail pages - it's not clickable
         if (card && card.closest('.detailImageContainer')) card = null;
@@ -1032,7 +1065,8 @@
         if (tab && tab.classList.contains('emby-tab-button-active')) tab = null;
         const nav = event.target.closest('.headerBackButton, .headerHomeButton, .mainDrawerButton, .headerSyncButton, .headerCastButton, .headerSearchButton, .headerUserButton');
         const menuItem = event.target.closest('a.listItem-border.emby-button');
-        const target = card || button || tab || nav || menuItem;
+        const alphaPicker = event.target.closest('.alphaPickerButton');
+        const target = card || button || tab || nav || menuItem || alphaPicker;
 
         if (target && target !== selectedElement) {
             clearTimeout(mouseDebounceTimer);

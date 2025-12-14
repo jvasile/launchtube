@@ -3,7 +3,7 @@
 # Documentation and examples see https://github.com/8gears/do
 #
 SCRIPTNAME=`basename "$0"`
-BASEDIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )/..
+BASEDIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 cd ${BASEDIR}
 
 wsl() {
@@ -42,7 +42,33 @@ wsl() {
     powershell.exe -Command "cd '$WIN_DEST'; & '$FLUTTER' build windows --dart-define=APP_VERSION=$VERSION --dart-define=GIT_COMMIT=$GIT_COMMIT --dart-define=BUILD_DATE=$BUILD_DATE"
 }
 
+update-ai() {
+  if [ -z "$1" ]; then
+    echo "Update CLAUDE.md or GEMINI.md from instructions stored on the web as text file."
+    echo
+    echo "You can see James Vasile's instructions at https://wiki.jamesvasile.com/pub/tech/claude.md?do=export_raw"
+    echo
+    echo "Usage: ./dosh update-ai <filename>"
+    echo "Example: ./dosh update-ai GEMINI.md"
+    return 1
+  fi
 
+  local URL=$(git config --global ai-instructions.url)
+  if [ -z "$URL" ]; then
+    echo "Error: Git config variable 'ai-instructions.url' is not set."
+    echo "Please set it using: git config --global ai-instructions.url "<your-url>""
+    return 1
+  fi
+
+  echo "Fetching AI instructions from $URL and writing to $1"
+  curl -s "$URL" > "$1"
+  if [ $? -eq 0 ]; then
+    echo "Successfully updated AI instructions in $1"
+  else
+    echo "Error: Failed to fetch or write AI instructions."
+    return 1
+  fi
+}
 
 "$@" # <- execute the task
 [ "$#" -gt 0 ] || printf "Usage:\n\t./${SCRIPTNAME} %s\n" "($(compgen -A function | grep '^[^_]' | paste -sd '|' -))"

@@ -215,11 +215,13 @@
             event.preventDefault();
             event.stopPropagation();
 
-            // Check if we're on a detail page - go back instead of exit
+            // Check if we're on a detail page or dashboard - go back instead of exit
             const isDetailPage = document.querySelector('.detailPageContent, .itemDetailPage, [data-type="Program"]') ||
                                  window.location.hash.includes('id=');
-            if (isDetailPage) {
-                serverLog('Escape on detail page, going back');
+            const isDashboard = window.location.hash.includes('/dashboard') ||
+                               window.location.hash.includes('/configurationpage');
+            if (isDetailPage || isDashboard) {
+                serverLog(`Escape on ${isDashboard ? 'dashboard' : 'detail page'}, going back`);
                 ignoreMouseUntil = Date.now() + 1000;
                 history.back();
                 return;
@@ -777,6 +779,9 @@
         .launchtube-selected .cardImageContainer {
             box-shadow: inset 0 0 0 4px #00a4dc, inset 0 0 0 6px #fff !important;
         }
+        .launchtube-selected {
+            box-shadow: 0 0 0 3px #00a4dc !important;
+        }
         .launchtube-nav-highlight {
             box-shadow: inset 0 0 0 3px #00a4dc !important;
             background-color: rgba(0, 164, 220, 0.2) !important;
@@ -794,8 +799,20 @@
         const seen = new Set(); // Avoid duplicates
 
         // Navbar buttons and tabs (require minimum size and visibility)
-        document.querySelectorAll('.headerBackButton, .headerHomeButton, .mainDrawerButton, .headerSyncButton, .headerCastButton, .headerSearchButton, .headerUserButton, .emby-tab-button').forEach(nav => {
-            const rect = nav.getBoundingClientRect();
+        // Also check for MUI IconButtons anywhere and buttons with back/arrow icons
+        document.querySelectorAll('.headerBackButton, .headerHomeButton, .mainDrawerButton, .headerSyncButton, .headerCastButton, .headerSearchButton, .headerUserButton, .emby-tab-button, .MuiIconButton-root, [class*="Back"], [aria-label*="back" i], [aria-label*="Back" i]').forEach(nav => {
+            let rect = nav.getBoundingClientRect();
+            // Some buttons (like back) have 0 size but contain an icon with size
+            if (rect.width < 20 || rect.height < 20) {
+                const icon = nav.querySelector('span, i, svg, .material-icons, [class*="Icon"]');
+                if (icon) {
+                    rect = icon.getBoundingClientRect();
+                }
+            }
+            // Debug MUI buttons
+            if (nav.classList.contains('MuiIconButton-root')) {
+                serverLog(`MuiIconButton: ${rect.width}x${rect.height} top=${rect.top} aria="${nav.getAttribute('aria-label')}"`);
+            }
             if (rect.width < 20 || rect.height < 20) return; // Skip tiny elements
             const style = window.getComputedStyle(nav);
             if (style.opacity === '0' || style.visibility === 'hidden' || style.display === 'none') return;
@@ -806,8 +823,31 @@
             elements.push({ el: nav, rect, type: 'nav' });
         });
 
-        // Menu items (profile dropdown, settings, dashboard sidebar, etc.)
-        document.querySelectorAll('a.listItem-border.emby-button:not(.hide), .navMenuOption, .sidebarLink, .mainDrawer a.navMenuOption, .listItem-button').forEach(item => {
+        // =========================================================================
+        // MENU ITEMS - Settings pages, dashboard sidebar, profile dropdown
+        // =========================================================================
+        // CRITICAL: Skip items inside .mainDrawer (the hamburger menu sidebar)
+        // The drawer is present on ALL pages but hidden off-screen when closed.
+        // Drawer items still have non-zero bounding rects even when "closed".
+        // If we include drawer items, pressing UP from the first card will
+        // navigate to invisible drawer items instead of staying on the card.
+        //
+        // On dashboard SUBPAGES (like /dashboard/settings), we exclude the sidebar
+        // entirely so navigation stays in the content area. User can:
+        //   - Press Escape to go back
+        //   - Press Left from content to return to sidebar
+        // Jellyfin 10.9+ uses Material UI (.MuiListItemButton-root) for dashboard.
+        // =========================================================================
+        const isDashboardSubpage = window.location.hash.includes('/dashboard/') ||
+                                   window.location.hash.includes('/configurationpage?');
+        // On subpages, skip MUI sidebar items UNLESS we're currently on a sidebar item
+        // (need to be able to navigate within sidebar after pressing Left to get there)
+        const currentlyOnSidebar = selectedElement && selectedElement.classList.contains('MuiListItemButton-root');
+        const menuSelector = (isDashboardSubpage && !currentlyOnSidebar)
+            ? 'a.listItem-border.emby-button:not(.hide), .navMenuOption, .sidebarLink, .listItem-button'
+            : '.MuiListItemButton-root, a.listItem-border.emby-button:not(.hide), .navMenuOption, .sidebarLink, .listItem-button';
+        document.querySelectorAll(menuSelector).forEach(item => {
+            if (item.closest('.mainDrawer')) return; // SKIP - drawer is off-screen when closed
             const rect = item.getBoundingClientRect();
             if (rect.width < 20 || rect.height < 20) return;
             const style = window.getComputedStyle(item);
@@ -855,6 +895,29 @@
             }
         });
 
+        // Settings/form elements (for dashboard settings pages)
+        // Only include if we're on a dashboard/settings page to avoid cluttering normal navigation
+        const isDashboardPage = window.location.hash.includes('/dashboard') ||
+                               window.location.hash.includes('/configurationpage');
+        if (isDashboardPage) {
+            // Form elements and buttons in dashboard content area
+            // Also include .listItem for user lists, activity lists, etc.
+            document.querySelectorAll('input:not([type="hidden"]), select, button.emby-button:not(.hide), button.fab:not(.hide), .checkboxContainer, .selectContainer, .listItem:not(.MuiListItemButton-root)').forEach(el => {
+                if (el.closest('.mainDrawer')) return; // Skip drawer
+                // On subpages, also skip the MUI sidebar
+                if (isDashboardSubpage && el.closest('.MuiDrawer-root')) return;
+                if (seen.has(el)) return;
+                const rect = el.getBoundingClientRect();
+                if (rect.width < 10 || rect.height < 10) return;
+                const style = window.getComputedStyle(el);
+                if (style.opacity === '0' || style.visibility === 'hidden' || style.display === 'none') return;
+                seen.add(el);
+                if (rect.top < window.innerHeight && rect.bottom > 0 && rect.left > 0) {
+                    elements.push({ el, rect, type: 'input' });
+                }
+            });
+        }
+
         // Sort by position: top-to-bottom, then left-to-right
         elements.sort((a, b) => {
             const rowDiff = a.rect.top - b.rect.top;
@@ -873,6 +936,9 @@
         }
 
         selectedElement = element;
+        if (!element) {
+            serverLog('selectElement called with null/undefined');
+        }
 
         if (element) {
             // Use different highlight styles based on element type
@@ -935,6 +1001,7 @@
         const currentCenterY = currentRect.top + currentRect.height / 2;
         const currentIsAlpha = selectedElement.classList.contains('alphaPickerButton');
         const currentIsCard = selectedElement.classList.contains('card');
+        const currentIsSidebar = selectedElement.classList.contains('MuiListItemButton-root');
 
         let bestElement = null;
         let bestDistance = Infinity;
@@ -944,6 +1011,13 @@
             const centerX = rect.left + rect.width / 2;
             const centerY = rect.top + rect.height / 2;
             const isAlpha = type === 'alpha';
+            const isSidebar = el.classList.contains('MuiListItemButton-root');
+
+            // When on sidebar, up/down should ONLY navigate within sidebar
+            // Content area is reached via Right arrow or Enter, not up/down
+            if (currentIsSidebar && !isSidebar && (direction === 'up' || direction === 'down')) {
+                return; // Skip non-sidebar elements for up/down when on sidebar
+            }
 
             // Check vertical overlap for left/right navigation
             const hasVerticalOverlap = currentRect.top < rect.bottom && currentRect.bottom > rect.top;
@@ -959,6 +1033,10 @@
                     }
                     break;
                 case 'right':
+                    // From sidebar, Right should activate the menu item (handled below), not navigate
+                    if (currentIsSidebar) {
+                        return; // Skip all elements - we'll activate instead
+                    }
                     // To alpha picker, allow going right without strict vertical overlap
                     if (isAlpha && !currentIsAlpha) {
                         isValidDirection = centerX > currentCenterX + 10;
@@ -978,8 +1056,8 @@
                 let distance;
                 if (direction === 'up' || direction === 'down') {
                     distance = Math.abs(centerY - currentCenterY) + Math.abs(centerX - currentCenterX) * 0.1;
-                } else if ((currentIsAlpha && !isAlpha) || (isAlpha && !currentIsAlpha)) {
-                    // When navigating to/from alpha picker, prioritize vertical proximity
+                } else if ((currentIsAlpha && !isAlpha) || (isAlpha && !currentIsAlpha) || (currentIsSidebar && !isSidebar)) {
+                    // When navigating to/from alpha picker or sidebar, prioritize vertical proximity
                     distance = Math.abs(centerY - currentCenterY) + Math.abs(centerX - currentCenterX) * 0.5;
                 } else {
                     distance = Math.abs(centerX - currentCenterX) + Math.abs(centerY - currentCenterY) * 10;
@@ -995,8 +1073,42 @@
         if (bestElement) {
             ignoreMouseUntil = Date.now() + 500;
             const rect = bestElement.getBoundingClientRect();
-            serverLog(`Nav ${direction}: -> "${bestElement.textContent?.trim()?.substring(0,20) || bestElement.className?.substring(0,30)}" at left=${Math.round(rect.left)}`);
+            serverLog(`Nav ${direction}: -> "${bestElement.textContent?.trim()?.substring(0,20) || bestElement.className?.substring(0,30)}" at top=${Math.round(rect.top)}`);
             selectElement(bestElement);
+        } else {
+            // Special case: Right arrow from sidebar -> activate the menu item (like Enter)
+            if (direction === 'right' && currentIsSidebar) {
+                serverLog('Nav right from sidebar: activating menu item');
+                activateElement();
+                return;
+            }
+
+            // Special case: Left arrow on dashboard subpage with no target -> go to sidebar
+            const isDashboardSubpage = window.location.hash.includes('/dashboard/') ||
+                                       window.location.hash.includes('/configurationpage?');
+            if (direction === 'left' && isDashboardSubpage && currentRect) {
+                // Find sidebar item closest to current Y position
+                const sidebarItems = document.querySelectorAll('.MuiListItemButton-root');
+                let bestItem = null;
+                let bestDist = Infinity;
+                for (const item of sidebarItems) {
+                    const rect = item.getBoundingClientRect();
+                    if (rect.width > 0 && rect.height > 0 && rect.top > 0 && rect.top < window.innerHeight) {
+                        const dist = Math.abs(rect.top - currentRect.top);
+                        if (dist < bestDist) {
+                            bestDist = dist;
+                            bestItem = item;
+                        }
+                    }
+                }
+                if (bestItem) {
+                    ignoreMouseUntil = Date.now() + 500;
+                    selectElement(bestItem);
+                    serverLog(`Nav left: -> sidebar "${bestItem.textContent?.trim()?.substring(0,20)}"`);
+                    return;
+                }
+            }
+            serverLog(`Nav ${direction}: no valid target found from "${selectedElement?.textContent?.trim()?.substring(0,20) || 'none'}" at top=${Math.round(currentRect?.top || 0)}`);
         }
     }
 
@@ -1026,6 +1138,28 @@
                 serverLog('Activating card');
                 link.click();
             }
+        } else if (selectedElement.classList.contains('MuiListItemButton-root')) {
+            // Sidebar menu item - check if already on this page
+            const isSelected = selectedElement.classList.contains('Mui-selected') ||
+                              selectedElement.getAttribute('aria-selected') === 'true' ||
+                              selectedElement.closest('.MuiListItem-root')?.classList.contains('Mui-selected');
+            if (isSelected) {
+                // Already on this page - just move to content area
+                serverLog('Sidebar item already active, moving to content');
+                const contentElements = document.querySelectorAll('input:not([type="hidden"]), select, button.emby-button:not(.hide), button.fab:not(.hide), .checkboxContainer, .selectContainer, .listItem:not(.MuiListItemButton-root)');
+                for (const el of contentElements) {
+                    if (el.closest('.mainDrawer') || el.closest('.MuiDrawer-root')) continue;
+                    const rect = el.getBoundingClientRect();
+                    if (rect.width > 0 && rect.height > 0 && rect.top > 0 && rect.top < window.innerHeight && rect.left > 250) {
+                        selectElement(el);
+                        serverLog('Moved to content: ' + (el.name || el.className?.substring(0, 20)));
+                        return;
+                    }
+                }
+            }
+            // Not selected or no content found - click to navigate
+            serverLog('Activating sidebar menu item');
+            selectedElement.click();
         } else {
             // Button or other element - just click it
             serverLog('Activating button');
@@ -1085,60 +1219,129 @@
         }
     });
 
-    // Auto-select appropriate element when page loads/changes
-    let hasAutoSelected = false; // Track if we've done initial selection on this page
+    // =========================================================================
+    // AUTO-SELECT PRIORITY ORDER - DO NOT CHANGE WITHOUT CAREFUL CONSIDERATION
+    // =========================================================================
+    // This function runs when a page loads to select the first interactive element.
+    // The priority order is CRITICAL and depends on page type:
+    //
+    // NORMAL PAGES (home, library, etc.):
+    //   1. Play/Resume button (on detail pages)
+    //   2. Cards - THIS IS THE MAIN CONTENT
+    //   3. Menu items (fallback only)
+    //
+    // DASHBOARD/SETTINGS PAGES:
+    //   1. Menu items in the sidebar - THIS IS THE MAIN NAVIGATION
+    //   2. Cards (fallback - dashboard has "active devices" card)
+    //
+    // COMMON REGRESSION: Menu items get selected on the home page because:
+    //   - The sidebar drawer (.mainDrawer) has menu items that pass visibility checks
+    //   - Drawer items may have non-zero size even when drawer is "closed"
+    //   - DO NOT select drawer items - they are NOT the dashboard sidebar
+    // =========================================================================
+    let hasAutoSelected = false;
     function autoSelectFirst() {
-        // On detail pages, prioritize play/resume button
-        const playBtn = document.querySelector('.btnPlay:not(.hide), .btnResume:not(.hide)');
-        let hasVisiblePlayBtn = false;
-        if (playBtn) {
-            const rect = playBtn.getBoundingClientRect();
-            if (rect.width > 0 && rect.height > 0) {
-                hasVisiblePlayBtn = true;
-                // Select play button if: not yet selected, OR currently have a card selected (upgrade card to button)
-                const currentIsCard = selectedElement && selectedElement.classList.contains('card');
-                if (!hasAutoSelected || currentIsCard) {
-                    hasAutoSelected = true;
-                    selectElement(playBtn);
-                    serverLog('Auto-selected play button');
-                }
-                return;
-            }
-        }
+        const isDashboard = window.location.hash.includes('/dashboard') ||
+                           window.location.hash.includes('/configurationpage') ||
+                           window.location.hash.includes('mypreferencesmenu');
 
-        // First try to select a visible card (main content)
-        if (!hasAutoSelected) {
-            const cards = Array.from(document.querySelectorAll('.card')).filter(card => {
-                if (card.closest('.detailImageContainer')) return false;
-                const rect = card.getBoundingClientRect();
-                return rect.width > 0 && rect.height > 0 && rect.top < window.innerHeight && rect.bottom > 0;
-            });
-            if (cards.length > 0) {
-                hasAutoSelected = true;
-                selectElement(cards[0]);
-                serverLog('Auto-selected first card');
-                return;
-            }
-        }
-
-        // On settings/menu pages (no cards), prioritize first menu item
-        if (!hasAutoSelected) {
-            const menuItems = document.querySelectorAll('a.listItem-border.emby-button:not(.hide), .navMenuOption, .sidebarLink, .listItem-button');
-            for (const menuItem of menuItems) {
-                const rect = menuItem.getBoundingClientRect();
-                if (rect.width > 0 && rect.height > 0 && rect.top < window.innerHeight) {
-                    hasAutoSelected = true;
-                    selectElement(menuItem);
-                    serverLog('Auto-selected first menu item');
+        // PRIORITY 1: Play/Resume button on detail pages (not on dashboard)
+        if (!isDashboard) {
+            const playBtn = document.querySelector('.btnPlay:not(.hide), .btnResume:not(.hide)');
+            if (playBtn) {
+                const rect = playBtn.getBoundingClientRect();
+                if (rect.width > 0 && rect.height > 0) {
+                    const currentIsCard = selectedElement && selectedElement.classList.contains('card');
+                    if (!hasAutoSelected || currentIsCard) {
+                        hasAutoSelected = true;
+                        selectElement(playBtn);
+                        serverLog('Auto-selected play button');
+                    }
                     return;
                 }
             }
         }
 
-        // If already have selection, keep it
-        if (selectedElement) return;
+        // PRIORITY 2 (dashboard subpages like /dashboard/devices): Content area FIRST
+        // When navigating to a specific settings page, select the content, not the sidebar
+        const isDashboardSubpage = isDashboard && (
+            window.location.hash.includes('/dashboard/') ||
+            window.location.hash.includes('/configurationpage?')
+        );
+        if (isDashboardSubpage && !hasAutoSelected) {
+            const contentElements = document.querySelectorAll('.mainDrawerContent input:not([type="hidden"]), .mainDrawerContent select, .mainDrawerContent button:not(.hide), .mainDrawerContent .emby-button:not(.hide), .mainDrawerContent .checkboxContainer, .readOnlyContent input:not([type="hidden"]), .readOnlyContent select, .readOnlyContent button:not(.hide), .content-primary input:not([type="hidden"]), .content-primary select, .content-primary button:not(.hide)');
+            for (const el of contentElements) {
+                if (el.closest('.mainDrawer')) continue;
+                const rect = el.getBoundingClientRect();
+                if (rect.width > 0 && rect.height > 0 && rect.top > 0 && rect.top < window.innerHeight) {
+                    hasAutoSelected = true;
+                    selectElement(el);
+                    serverLog('Auto-selected settings content: ' + (el.name || el.className?.substring(0, 20)));
+                    return;
+                }
+            }
+        }
 
-        // Don't fall back to navbar on initial load - wait for cards/buttons to appear
+        // PRIORITY 2 (dashboard main page): Menu items in sidebar FIRST
+        // Dashboard has its own sidebar (NOT .mainDrawer) that should be primary navigation
+        // Jellyfin 10.9+ uses Material UI (MuiListItemButton) for dashboard sidebar
+        if (isDashboard && !isDashboardSubpage && !hasAutoSelected) {
+            // Try MUI buttons first (new Jellyfin), then fall back to older selectors
+            const menuItems = document.querySelectorAll('.MuiListItemButton-root, a.listItem-border.emby-button:not(.hide), .navMenuOption, .sidebarLink, .listItem-button');
+            serverLog(`Dashboard: found ${menuItems.length} potential menu items`);
+            for (const menuItem of menuItems) {
+                if (menuItem.closest('.mainDrawer')) continue; // Skip the hidden drawer
+                const rect = menuItem.getBoundingClientRect();
+                serverLog(`  Menu item: "${menuItem.textContent?.trim()?.substring(0,20)}" top=${rect.top} left=${rect.left} w=${rect.width}`);
+                if (rect.width > 0 && rect.height > 0 && rect.top < window.innerHeight && rect.top > 0) {
+                    hasAutoSelected = true;
+                    selectElement(menuItem);
+                    serverLog('Auto-selected dashboard menu item: ' + menuItem.textContent?.trim()?.substring(0, 20));
+                    return;
+                }
+            }
+        }
+
+        // PRIORITY 2 (normal pages): First visible card - THIS IS THE MAIN CONTENT
+        // Cards should ALWAYS be selected over menu items on non-dashboard pages
+        const cards = Array.from(document.querySelectorAll('.card')).filter(card => {
+            if (card.closest('.detailImageContainer')) return false;
+            const rect = card.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0 && rect.top < window.innerHeight && rect.bottom > 0;
+        });
+        if (cards.length > 0) {
+            if (!hasAutoSelected) {
+                hasAutoSelected = true;
+                selectElement(cards[0]);
+                serverLog('Auto-selected first card');
+            }
+            return; // IMPORTANT: Return here even if already selected - don't fall through to menu items
+        }
+
+        // PRIORITY 3: Menu items - fallback for pages with no cards
+        // =========================================================================
+        // CRITICAL: The drawer (.mainDrawer) is ALWAYS present in the DOM on every page.
+        // It's hidden off-screen (transform: translateX(-100%)) but items still have size.
+        // We MUST skip drawer items here, otherwise dashboard/settings pages will select
+        // drawer items instead of the actual page menu items.
+        // The dashboard has its OWN sidebar (not .mainDrawer) - those ARE selectable.
+        // =========================================================================
+        if (!hasAutoSelected) {
+            const menuItems = document.querySelectorAll('a.listItem-border.emby-button:not(.hide), .navMenuOption:not(.mainDrawer *), .sidebarLink, .listItem-button');
+            for (const menuItem of menuItems) {
+                if (menuItem.closest('.mainDrawer')) continue; // SKIP drawer items - see comment above
+                const rect = menuItem.getBoundingClientRect();
+                if (rect.width > 0 && rect.height > 0 && rect.top < window.innerHeight && rect.top > 0) {
+                    hasAutoSelected = true;
+                    selectElement(menuItem);
+                    serverLog('Auto-selected menu item: ' + menuItem.textContent?.trim()?.substring(0, 20));
+                    return;
+                }
+            }
+        }
+
+        // Keep existing selection if we have one
+        if (selectedElement) return;
     }
 
     // Watch for page changes
@@ -1163,11 +1366,13 @@
         let selectionInvalid = false;
         if (selectedElement) {
             if (!document.body.contains(selectedElement)) {
+                serverLog(`Selection invalid: element removed from DOM`);
                 selectionInvalid = true;
             } else {
                 // Check if still visible (not hidden by tab switch, etc.)
                 const rect = selectedElement.getBoundingClientRect();
                 if (rect.width === 0 || rect.height === 0) {
+                    serverLog(`Selection invalid: element has 0 size (${rect.width}x${rect.height})`);
                     selectionInvalid = true;
                 }
             }
@@ -1194,7 +1399,7 @@
 
     // Listen for hash changes (Jellyfin uses hash-based routing)
     window.addEventListener('hashchange', () => {
-        serverLog(`Hash changed to: ${location.hash}`);
+        serverLog(`Hash changed to: ${location.hash}, clearing selection`);
         if (selectedElement) {
             selectedElement.classList.remove('launchtube-selected', 'launchtube-nav-highlight');
         }

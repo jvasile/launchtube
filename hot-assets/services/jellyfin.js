@@ -799,8 +799,27 @@
             background-color: #ffeb3b !important;
             color: #000 !important;
         }
+        /* Disable hover when mouse is idle (prevents scroll-under hover) */
+        body.launchtube-mouse-idle .card {
+            pointer-events: none !important;
+        }
     `;
     document.head.appendChild(navStyle);
+
+    // Track mouse idle state to prevent hover when scrolling under stationary mouse
+    let mouseIdleTimer = null;
+    function setMouseIdle() {
+        document.body.classList.add('launchtube-mouse-idle');
+    }
+    function setMouseActive() {
+        document.body.classList.remove('launchtube-mouse-idle');
+        clearTimeout(mouseIdleTimer);
+        // Go idle after mouse stops moving for 500ms
+        mouseIdleTimer = setTimeout(setMouseIdle, 500);
+    }
+    document.addEventListener('mousemove', setMouseActive);
+    // Start in idle state
+    setMouseIdle();
 
     // Get all navigable elements - navbar, cards, and action buttons
     function getNavigableElements(includeBelow = false) {
@@ -1043,15 +1062,14 @@
                 return; // Skip non-sidebar elements for up/down when on sidebar
             }
 
-            // Alpha picker is ONLY reachable via Right arrow, exits via Left arrow
-            // Never navigate to alpha picker with up/down from anywhere
-            if (isAlpha && (direction === 'up' || direction === 'down')) {
-                return; // Skip alpha picker for all up/down navigation
-            }
-
-            // When on alpha picker, up/down stays within alpha picker, left/right exits
-            if (currentIsAlpha && !isAlpha && (direction === 'up' || direction === 'down')) {
-                return; // Skip non-alpha elements for up/down when on alpha picker
+            // Alpha picker: up/down stays within, only reachable via Right, exits via Left
+            if (direction === 'up' || direction === 'down') {
+                if (currentIsAlpha && !isAlpha) {
+                    return; // On alpha picker, skip non-alpha elements for up/down
+                }
+                if (!currentIsAlpha && isAlpha) {
+                    return; // Not on alpha picker, skip alpha elements for up/down
+                }
             }
 
             // When on a card navigating up/down, strongly prefer other cards over navbar

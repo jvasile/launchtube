@@ -776,10 +776,12 @@
     // Add highlight style
     const navStyle = document.createElement('style');
     navStyle.textContent = `
+        /* Main page cards - inset shadow on image container */
         .launchtube-selected .cardImageContainer {
             box-shadow: inset 0 0 0 4px #00a4dc, inset 0 0 0 6px #fff !important;
         }
-        .launchtube-selected {
+        /* Dashboard cards (inside MUI drawer layout) - outer shadow since cardImageContainer doesn't work well */
+        .MuiBox-root .launchtube-selected.card {
             box-shadow: 0 0 0 3px #00a4dc !important;
         }
         .launchtube-nav-highlight {
@@ -800,7 +802,7 @@
 
         // Navbar buttons and tabs (require minimum size and visibility)
         // Also check for MUI IconButtons anywhere and buttons with back/arrow icons
-        document.querySelectorAll('.headerBackButton, .headerHomeButton, .mainDrawerButton, .headerSyncButton, .headerCastButton, .headerSearchButton, .headerUserButton, .emby-tab-button, .MuiIconButton-root, [class*="Back"], [aria-label*="back" i], [aria-label*="Back" i]').forEach(nav => {
+        document.querySelectorAll('.headerBackButton, .headerHomeButton, .mainDrawerButton, .headerSyncButton, .headerCastButton, .headerSearchButton, .headerUserButton, .emby-tab-button, .MuiIconButton-root, [class*="BackButton"], [aria-label*="back" i]').forEach(nav => {
             let rect = nav.getBoundingClientRect();
             // Some buttons (like back) have 0 size but contain an icon with size
             if (rect.width < 20 || rect.height < 20) {

@@ -50,6 +50,9 @@ class _LauncherHomeState extends State<LauncherHome> with WidgetsBindingObserver
   UserProfile? _currentProfile;
   bool _showingUserSelection = false;
   int _userSelectedIndex = 0;
+  bool _userMoveMode = false;
+  int? _userMoveFromIndex;
+  List<String> _availablePhotos = [];
 
   // Browser selection
   List<BrowserInfo> _availableBrowsers = [];
@@ -69,12 +72,37 @@ class _LauncherHomeState extends State<LauncherHome> with WidgetsBindingObserver
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _enterFullscreen();
+    _scanProfilePhotos();
     _initializeProfiles();
     _detectBrowsers();
     _detectMpv();
     _server.setAppsProvider(() => apps);
     _server.setCloseBrowserCallback(_closeBrowser);
     _server.start();
+  }
+
+  Future<void> _scanProfilePhotos() async {
+    final photosDir = Directory('${getAssetDirectory()}/images/profile-photos');
+    if (!await photosDir.exists()) return;
+
+    final photos = <String>[];
+    await for (final entity in photosDir.list()) {
+      if (entity is File) {
+        final name = entity.path.split('/').last.toLowerCase();
+        // Only include image files that aren't empty
+        if ((name.endsWith('.png') || name.endsWith('.jpg') || name.endsWith('.jpeg'))) {
+          final stat = await entity.stat();
+          if (stat.size > 0) {
+            photos.add(entity.path.split('/').last);
+          }
+        }
+      }
+    }
+
+    photos.sort();
+    setState(() {
+      _availablePhotos = photos;
+    });
   }
 
   Future<void> _initializeProfiles() async {
@@ -132,36 +160,137 @@ class _LauncherHomeState extends State<LauncherHome> with WidgetsBindingObserver
       final totalItems = _profiles.length + 1; // +1 for "Add User" tile
       const int columns = 4;
 
+      // Handle escape - cancel move mode or go back to app grid
       if (event.logicalKey == LogicalKeyboardKey.escape) {
-        // If we have a current profile, go back to app grid
-        if (_currentProfile != null) {
+        if (_userMoveMode) {
+          _userMoveMode = false;
+          _userSelectedIndex = _userMoveFromIndex!;
+          _userMoveFromIndex = null;
+        } else if (_currentProfile != null) {
           _showingUserSelection = false;
         }
         return;
       }
 
+      // In move mode, limit navigation to profile tiles only (not add button)
+      final maxIndex = _userMoveMode ? _profiles.length - 1 : totalItems - 1;
+
       if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
-        _userSelectedIndex = (_userSelectedIndex + 1) % totalItems;
+        if (_userMoveMode) {
+          _userSelectedIndex = (_userSelectedIndex + 1).clamp(0, maxIndex);
+        } else {
+          _userSelectedIndex = (_userSelectedIndex + 1) % totalItems;
+        }
       } else if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-        _userSelectedIndex = (_userSelectedIndex - 1 + totalItems) % totalItems;
+        if (_userMoveMode) {
+          _userSelectedIndex = (_userSelectedIndex - 1).clamp(0, maxIndex);
+        } else {
+          _userSelectedIndex = (_userSelectedIndex - 1 + totalItems) % totalItems;
+        }
       } else if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-        _userSelectedIndex = (_userSelectedIndex + columns) % totalItems;
+        if (_userMoveMode) {
+          _userSelectedIndex = (_userSelectedIndex + columns).clamp(0, maxIndex);
+        } else {
+          _userSelectedIndex = (_userSelectedIndex + columns) % totalItems;
+        }
       } else if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-        _userSelectedIndex = (_userSelectedIndex - columns + totalItems) % totalItems;
+        if (_userMoveMode) {
+          _userSelectedIndex = (_userSelectedIndex - columns).clamp(0, maxIndex);
+        } else {
+          _userSelectedIndex = (_userSelectedIndex - columns + totalItems) % totalItems;
+        }
       } else if (event.logicalKey == LogicalKeyboardKey.enter ||
           event.logicalKey == LogicalKeyboardKey.select) {
-        if (_userSelectedIndex < _profiles.length) {
+        if (_userMoveMode) {
+          // Confirm move
+          if (_userMoveFromIndex != _userSelectedIndex) {
+            final item = _profiles.removeAt(_userMoveFromIndex!);
+            _profiles.insert(_userSelectedIndex, item);
+            _updateProfileOrders();
+          }
+          _userMoveMode = false;
+          _userMoveFromIndex = null;
+        } else if (_userSelectedIndex < _profiles.length) {
           _selectProfile(_profiles[_userSelectedIndex]);
         } else {
           _showAddUserDialog();
         }
       } else if (event.logicalKey == LogicalKeyboardKey.keyC) {
         // Edit user (like 'C' for configure on app tiles)
-        if (_userSelectedIndex < _profiles.length) {
+        if (!_userMoveMode && _userSelectedIndex < _profiles.length) {
           _showEditUserDialog(_userSelectedIndex);
+        }
+      } else if (event.logicalKey == LogicalKeyboardKey.keyM) {
+        // Toggle move mode for current profile
+        if (_userSelectedIndex < _profiles.length) {
+          if (_userMoveMode) {
+            // Cancel move mode
+            _userMoveMode = false;
+            _userSelectedIndex = _userMoveFromIndex!;
+            _userMoveFromIndex = null;
+          } else {
+            // Enter move mode
+            _userMoveMode = true;
+            _userMoveFromIndex = _userSelectedIndex;
+          }
+        }
+      } else if (event.character == '?') {
+        _showUserHelpDialog();
+      } else if (event.character == '+') {
+        if (!_userMoveMode) {
+          _showAddUserDialog();
         }
       }
     });
+  }
+
+  void _updateProfileOrders() {
+    // Update order field for each profile based on list position
+    for (int i = 0; i < _profiles.length; i++) {
+      _profiles[i] = _profiles[i].copyWith(order: i);
+    }
+    ProfileManager.saveProfiles(_profiles);
+  }
+
+  void _showUserHelpDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => KeyboardListener(
+        focusNode: FocusNode()..requestFocus(),
+        autofocus: true,
+        onKeyEvent: (event) {
+          if (event is KeyDownEvent &&
+              (event.logicalKey == LogicalKeyboardKey.escape ||
+               event.logicalKey == LogicalKeyboardKey.enter ||
+               event.character == '?')) {
+            Navigator.of(context).pop();
+          }
+        },
+        child: AlertDialog(
+          backgroundColor: const Color(0xFF2A2A4E),
+          title: const Text('Keyboard Shortcuts', style: TextStyle(color: Colors.white)),
+          content: const Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _HelpRow(shortcut: 'Arrow Keys', description: 'Navigate'),
+              _HelpRow(shortcut: 'Enter', description: 'Select user'),
+              _HelpRow(shortcut: '+', description: 'Add user'),
+              _HelpRow(shortcut: 'C', description: 'Configure user'),
+              _HelpRow(shortcut: 'M', description: 'Move user'),
+              _HelpRow(shortcut: 'Escape', description: 'Cancel / Back'),
+              _HelpRow(shortcut: '?', description: 'Show this help'),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _showAddUserDialog() {
@@ -169,8 +298,9 @@ class _LauncherHomeState extends State<LauncherHome> with WidgetsBindingObserver
       context: context,
       builder: (context) => _UserDialog(
         isNewUser: true,
-        onSave: (name, colorValue) async {
-          final profile = await ProfileManager.createProfile(name, colorValue);
+        availablePhotos: _availablePhotos,
+        onSave: (name, colorValue, photoPath) async {
+          final profile = await ProfileManager.createProfile(name, colorValue, photoPath: photoPath);
           setState(() {
             _profiles.add(profile);
             _userSelectedIndex = _profiles.length - 1;
@@ -270,8 +400,8 @@ class _LauncherHomeState extends State<LauncherHome> with WidgetsBindingObserver
     );
   }
 
-  Future<void> _createFirstProfile(String name, int colorValue) async {
-    final profile = await ProfileManager.createProfile(name, colorValue);
+  Future<void> _createFirstProfile(String name, int colorValue, {String? photoPath}) async {
+    final profile = await ProfileManager.createProfile(name, colorValue, photoPath: photoPath);
 
     // Migrate legacy apps.json if it exists
     await ProfileManager.migrateLegacyApps(profile);
@@ -292,21 +422,20 @@ class _LauncherHomeState extends State<LauncherHome> with WidgetsBindingObserver
         isNewUser: false,
         initialName: profile.displayName,
         initialColorValue: profile.colorValue,
+        initialPhotoPath: profile.photoPath,
+        availablePhotos: _availablePhotos,
         canDelete: _profiles.length > 1,
-        onSave: (name, colorValue) async {
+        onSave: (name, colorValue, photoPath) async {
           // Update profile
           final updatedProfile = profile.copyWith(
             displayName: name,
             colorValue: colorValue,
+            photoPath: photoPath,
+            clearPhoto: photoPath == null,
           );
 
           // Save to disk
-          final profiles = await ProfileManager.loadProfiles();
-          final profileIndex = profiles.indexWhere((p) => p.id == profile.id);
-          if (profileIndex >= 0) {
-            profiles[profileIndex] = updatedProfile;
-            await ProfileManager.saveProfiles(profiles);
-          }
+          await ProfileManager.saveProfile(updatedProfile);
 
           setState(() {
             _profiles[index] = updatedProfile;
@@ -390,24 +519,88 @@ class _LauncherHomeState extends State<LauncherHome> with WidgetsBindingObserver
                     spacing: spacing,
                     runSpacing: spacing,
                     children: [
-                      // User profile tiles
+                      // User profile tiles with drag-and-drop
                       ...List.generate(_profiles.length, (index) {
                         final profile = _profiles[index];
                         final isSelected = _userSelectedIndex == index;
-                        return SizedBox(
-                          width: itemWidth,
-                          height: itemHeight,
-                          child: _UserTile(
-                            profile: profile,
-                            isSelected: isSelected,
-                            onTap: () => _selectProfile(profile),
-                            onHover: (hovering) {
-                              if (hovering) {
-                                setState(() => _userSelectedIndex = index);
-                              }
-                            },
-                            onEdit: () => _showEditUserDialog(index),
-                          ),
+                        return DragTarget<int>(
+                          onWillAcceptWithDetails: (details) => details.data != index,
+                          onAcceptWithDetails: (details) {
+                            setState(() {
+                              final fromIndex = details.data;
+                              final item = _profiles.removeAt(fromIndex);
+                              _profiles.insert(index, item);
+                              _userSelectedIndex = index;
+                            });
+                            _updateProfileOrders();
+                          },
+                          builder: (context, candidateData, rejectedData) {
+                            return Draggable<int>(
+                              data: index,
+                              feedback: Material(
+                                color: Colors.transparent,
+                                child: SizedBox(
+                                  width: itemWidth,
+                                  height: itemHeight,
+                                  child: Opacity(
+                                    opacity: 0.8,
+                                    child: _UserTile(
+                                      profile: profile,
+                                      isSelected: true,
+                                      onTap: () {},
+                                      onHover: (_) {},
+                                      onEdit: () {},
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              childWhenDragging: SizedBox(
+                                width: itemWidth,
+                                height: itemHeight,
+                                child: _UserTile(
+                                  profile: profile,
+                                  isSelected: false,
+                                  isMoving: true,
+                                  onTap: () {},
+                                  onHover: (_) {},
+                                  onEdit: () {},
+                                ),
+                              ),
+                              child: SizedBox(
+                                width: itemWidth,
+                                height: itemHeight,
+                                child: _UserTile(
+                                  profile: profile,
+                                  isSelected: isSelected,
+                                  isDropTarget: candidateData.isNotEmpty || (_userMoveMode && _userSelectedIndex == index && _userMoveFromIndex != index),
+                                  isMoving: _userMoveMode && _userMoveFromIndex == index,
+                                  onTap: () {
+                                    if (_userMoveMode) {
+                                      // In move mode, tap confirms move to this position
+                                      if (_userMoveFromIndex != index) {
+                                        setState(() {
+                                          final item = _profiles.removeAt(_userMoveFromIndex!);
+                                          _profiles.insert(index, item);
+                                          _userSelectedIndex = index;
+                                          _userMoveMode = false;
+                                          _userMoveFromIndex = null;
+                                        });
+                                        _updateProfileOrders();
+                                      }
+                                    } else {
+                                      _selectProfile(profile);
+                                    }
+                                  },
+                                  onHover: (hovering) {
+                                    if (hovering) {
+                                      setState(() => _userSelectedIndex = index);
+                                    }
+                                  },
+                                  onEdit: () => _showEditUserDialog(index),
+                                ),
+                              ),
+                            );
+                          },
                         );
                       }),
                       // Add User tile
@@ -1380,7 +1573,7 @@ class _LauncherHomeState extends State<LauncherHome> with WidgetsBindingObserver
                                   _saveApps();
                                 },
                                 builder: (context, candidateData, rejectedData) {
-                                  return LongPressDraggable<int>(
+                                  return Draggable<int>(
                                     data: index,
                                     feedback: Material(
                                       color: Colors.transparent,
@@ -2661,6 +2854,8 @@ class _HelpRow extends StatelessWidget {
 class _UserTile extends StatefulWidget {
   final UserProfile profile;
   final bool isSelected;
+  final bool isMoving;
+  final bool isDropTarget;
   final VoidCallback onTap;
   final ValueChanged<bool> onHover;
   final VoidCallback onEdit;
@@ -2668,6 +2863,8 @@ class _UserTile extends StatefulWidget {
   const _UserTile({
     required this.profile,
     required this.isSelected,
+    this.isMoving = false,
+    this.isDropTarget = false,
     required this.onTap,
     required this.onHover,
     required this.onEdit,
@@ -2693,55 +2890,99 @@ class _UserTileState extends State<_UserTile> {
       },
       child: GestureDetector(
         onTap: widget.onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeInOut,
-          transform: Matrix4.identity()..scale(widget.isSelected ? 1.1 : 1.0),
-          transformAlignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: widget.profile.color.withOpacity(0.3),
-            borderRadius: BorderRadius.circular(16),
-            border: widget.isSelected
-                ? Border.all(color: Colors.white, width: 4)
-                : Border.all(color: Colors.white24, width: 2),
-            boxShadow: widget.isSelected
-                ? [
-                    BoxShadow(
-                      color: widget.profile.color.withOpacity(0.5),
-                      blurRadius: 20,
-                      spreadRadius: 5,
-                    ),
-                  ]
-                : null,
-          ),
-          child: Stack(
-            children: [
-              Center(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final circleSize = constraints.maxWidth * 0.75;
+            final fontSize = circleSize * 0.4;
+            return AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeInOut,
+              transform: Matrix4.identity()..scale(widget.isSelected ? 1.1 : 1.0),
+              transformAlignment: Alignment.center,
+              child: Center(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Container(
-                      width: 80,
-                      height: 80,
-                      decoration: BoxDecoration(
-                        color: widget.profile.color,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white38, width: 2),
-                      ),
-                      child: Center(
-                        child: Text(
-                          widget.profile.displayName.isNotEmpty
-                              ? widget.profile.displayName[0].toUpperCase()
-                              : '?',
-                          style: TextStyle(
-                            fontSize: 36,
-                            fontWeight: FontWeight.bold,
-                            color: widget.profile.color.computeLuminance() > 0.5
-                                ? Colors.black
-                                : Colors.white,
+                    Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        Container(
+                          width: circleSize,
+                          height: circleSize,
+                          decoration: BoxDecoration(
+                            color: widget.profile.hasPhoto
+                                ? (widget.isMoving ? Colors.black38 : null)
+                                : (widget.isMoving ? widget.profile.color.withOpacity(0.5) : widget.profile.color),
+                            shape: BoxShape.circle,
+                            border: widget.isMoving
+                                ? Border.all(color: Colors.orangeAccent, width: 4)
+                                : widget.isDropTarget
+                                    ? Border.all(color: Colors.greenAccent, width: 4)
+                                    : widget.isSelected
+                                        ? Border.all(color: Colors.white, width: 4)
+                                        : Border.all(color: Colors.white38, width: 2),
+                            boxShadow: widget.isMoving
+                                ? [
+                                    BoxShadow(
+                                      color: Colors.orangeAccent.withOpacity(0.5),
+                                      blurRadius: 20,
+                                      spreadRadius: 5,
+                                    ),
+                                  ]
+                                : widget.isSelected
+                                    ? [
+                                        BoxShadow(
+                                          color: (widget.profile.hasPhoto ? Colors.white : widget.profile.color).withOpacity(0.5),
+                                          blurRadius: 20,
+                                          spreadRadius: 5,
+                                        ),
+                                      ]
+                                    : null,
                           ),
+                          child: widget.profile.hasPhoto
+                              ? ClipOval(
+                                  child: Image.file(
+                                    File('${getAssetDirectory()}/images/profile-photos/${widget.profile.photoPath}'),
+                                    fit: BoxFit.cover,
+                                    width: circleSize,
+                                    height: circleSize,
+                                  ),
+                                )
+                              : Center(
+                                  child: Text(
+                                    widget.profile.displayName.isNotEmpty
+                                        ? widget.profile.displayName[0].toUpperCase()
+                                        : '?',
+                                    style: TextStyle(
+                                      fontSize: fontSize,
+                                      fontWeight: FontWeight.bold,
+                                      color: widget.profile.color.computeLuminance() > 0.5
+                                          ? Colors.black
+                                          : Colors.white,
+                                    ),
+                                  ),
+                                ),
                         ),
-                      ),
+                        // Gear icon for editing - positioned at top-right of circle
+                        if (_isHovering || widget.isSelected)
+                          Positioned(
+                            top: -4,
+                            right: -4,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: Colors.black.withOpacity(0.5),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: IconButton(
+                                icon: const Icon(Icons.settings, color: Colors.white, size: 20),
+                                onPressed: widget.onEdit,
+                                tooltip: 'Edit',
+                                padding: const EdgeInsets.all(8),
+                                constraints: const BoxConstraints(),
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                     const SizedBox(height: 12),
                     Text(
@@ -2757,27 +2998,8 @@ class _UserTileState extends State<_UserTile> {
                   ],
                 ),
               ),
-              // Gear icon for editing
-              if (_isHovering || widget.isSelected)
-                Positioned(
-                  top: 8,
-                  right: 8,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.5),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: IconButton(
-                      icon: const Icon(Icons.settings, color: Colors.white, size: 20),
-                      onPressed: widget.onEdit,
-                      tooltip: 'Edit',
-                      padding: const EdgeInsets.all(8),
-                      constraints: const BoxConstraints(),
-                    ),
-                  ),
-                ),
-            ],
-          ),
+            );
+          },
         ),
       ),
     );
@@ -2802,56 +3024,58 @@ class _AddUserTile extends StatelessWidget {
       onExit: (_) => onHover(false),
       child: GestureDetector(
         onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeInOut,
-          transform: Matrix4.identity()..scale(isSelected ? 1.1 : 1.0),
-          transformAlignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(isSelected ? 0.2 : 0.1),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: isSelected ? Colors.white : Colors.white38,
-              width: isSelected ? 4 : 2,
-            ),
-            boxShadow: isSelected
-                ? [
-                    BoxShadow(
-                      color: Colors.white.withOpacity(0.3),
-                      blurRadius: 20,
-                      spreadRadius: 5,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final circleSize = constraints.maxWidth * 0.75;
+            return AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeInOut,
+              transform: Matrix4.identity()..scale(isSelected ? 1.1 : 1.0),
+              transformAlignment: Alignment.center,
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      width: circleSize,
+                      height: circleSize,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(isSelected ? 0.2 : 0.1),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: isSelected ? Colors.white : Colors.white38,
+                          width: isSelected ? 4 : 2,
+                        ),
+                        boxShadow: isSelected
+                            ? [
+                                BoxShadow(
+                                  color: Colors.white.withOpacity(0.3),
+                                  blurRadius: 20,
+                                  spreadRadius: 5,
+                                ),
+                              ]
+                            : null,
+                      ),
+                      child: Icon(
+                        Icons.add,
+                        size: circleSize * 0.4,
+                        color: Colors.white,
+                      ),
                     ),
-                  ]
-                : null,
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                width: 80,
-                height: 80,
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.2),
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white38, width: 2),
-                ),
-                child: const Icon(
-                  Icons.add,
-                  size: 40,
-                  color: Colors.white,
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Add User',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 12),
-              const Text(
-                'Add User',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
-              ),
-            ],
-          ),
+            );
+          },
         ),
       ),
     );
@@ -2862,14 +3086,18 @@ class _UserDialog extends StatefulWidget {
   final bool isNewUser;
   final String? initialName;
   final int? initialColorValue;
+  final String? initialPhotoPath;
+  final List<String> availablePhotos;
   final bool canDelete;
-  final Future<void> Function(String name, int colorValue) onSave;
+  final Future<void> Function(String name, int colorValue, String? photoPath) onSave;
   final Future<void> Function()? onDelete;
 
   const _UserDialog({
     required this.isNewUser,
     this.initialName,
     this.initialColorValue,
+    this.initialPhotoPath,
+    required this.availablePhotos,
     this.canDelete = false,
     required this.onSave,
     this.onDelete,
@@ -2884,16 +3112,17 @@ class _UserDialogState extends State<_UserDialog> {
   final _focusNode = FocusNode();
   final _textFieldFocusNode = FocusNode();
 
+  String? _selectedPhoto; // null means use color
   late int _selectedColorIndex;
-  int _focusedElement = 0; // 0=name, 1-N=colors, then buttons
+  int _focusedElement = 0; // 0=name, 1=photo circle, 2=color circle, 3+=buttons
   late bool _isTextFieldFocused;
 
   // Element indices
-  int get _firstColorIndex => 1;
-  int get _lastColorIndex => availableColors.length;
-  int get _deleteIndex => widget.canDelete ? availableColors.length + 1 : -1;
-  int get _cancelIndex => availableColors.length + (widget.canDelete ? 2 : 1);
-  int get _saveIndex => availableColors.length + (widget.canDelete ? 3 : 2);
+  static const int _photoCircleIndex = 1;
+  static const int _colorCircleIndex = 2;
+  int get _deleteIndex => widget.canDelete ? 3 : -1;
+  int get _cancelIndex => widget.canDelete ? 4 : 3;
+  int get _saveIndex => widget.canDelete ? 5 : 4;
 
   String get _title => widget.isNewUser ? 'Add User' : 'Configure User';
   String get _saveButtonLabel => widget.isNewUser ? 'Add' : 'Save';
@@ -2902,6 +3131,7 @@ class _UserDialogState extends State<_UserDialog> {
   void initState() {
     super.initState();
     _nameController = TextEditingController(text: widget.initialName ?? '');
+    _selectedPhoto = widget.initialPhotoPath;
 
     if (widget.initialColorValue != null) {
       _selectedColorIndex = availableColors.indexWhere(
@@ -2912,14 +3142,10 @@ class _UserDialogState extends State<_UserDialog> {
       _selectedColorIndex = Random().nextInt(availableColors.length);
     }
 
-    // Add User: start with text field focused for typing
-    // Configure User: start with text field highlighted but not focused
     _isTextFieldFocused = widget.isNewUser;
-
     _textFieldFocusNode.addListener(_onTextFieldFocusChange);
 
     if (widget.isNewUser) {
-      // Request focus after build
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _textFieldFocusNode.requestFocus();
       });
@@ -2938,9 +3164,7 @@ class _UserDialogState extends State<_UserDialog> {
   void _onTextFieldFocusChange() {
     setState(() {
       _isTextFieldFocused = _textFieldFocusNode.hasFocus;
-      if (_isTextFieldFocused) {
-        _focusedElement = 0;
-      }
+      if (_isTextFieldFocused) _focusedElement = 0;
     });
   }
 
@@ -2948,13 +3172,12 @@ class _UserDialogState extends State<_UserDialog> {
     final name = _nameController.text.trim();
     if (name.isEmpty) return;
     Navigator.pop(context);
-    widget.onSave(name, availableColors[_selectedColorIndex].value);
+    widget.onSave(name, availableColors[_selectedColorIndex].value, _selectedPhoto);
   }
 
   void _doDelete() async {
     if (widget.onDelete == null) return;
     Navigator.pop(context);
-    // Show confirmation
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -2977,26 +3200,50 @@ class _UserDialogState extends State<_UserDialog> {
         ],
       ),
     );
-    if (confirmed == true) {
-      widget.onDelete!();
+    if (confirmed == true) widget.onDelete!();
+  }
+
+  void _openPhotoPicker() async {
+    final selected = await showDialog<String>(
+      context: context,
+      builder: (context) => _PhotoPickerDialog(
+        availablePhotos: widget.availablePhotos,
+        selectedPhoto: _selectedPhoto,
+      ),
+    );
+    if (selected != null) {
+      setState(() => _selectedPhoto = selected);
+    }
+  }
+
+  void _openColorPicker() async {
+    final selected = await showDialog<int>(
+      context: context,
+      builder: (context) => _ColorPickerDialog(
+        selectedColorIndex: _selectedColorIndex,
+      ),
+    );
+    if (selected != null) {
+      setState(() {
+        _selectedColorIndex = selected;
+        _selectedPhoto = null; // Clear photo when color is picked
+      });
     }
   }
 
   void _handleKeyEvent(KeyEvent event) {
     if (event is! KeyDownEvent) return;
 
-    // If text field is focused for typing, let it handle most keys
     if (_isTextFieldFocused) {
       if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
         setState(() {
           _isTextFieldFocused = false;
-          _focusedElement = _firstColorIndex;
+          _focusedElement = widget.availablePhotos.isNotEmpty ? _photoCircleIndex : _colorCircleIndex;
           _textFieldFocusNode.unfocus();
         });
       } else if (event.logicalKey == LogicalKeyboardKey.escape) {
         Navigator.pop(context);
       }
-      // Enter while typing just stays in the field - user must navigate to button
       return;
     }
 
@@ -3008,11 +3255,12 @@ class _UserDialogState extends State<_UserDialog> {
 
       if (event.logicalKey == LogicalKeyboardKey.enter) {
         if (_focusedElement == 0) {
-          // Focus the text field for editing
           _isTextFieldFocused = true;
           _textFieldFocusNode.requestFocus();
-        } else if (_focusedElement >= _firstColorIndex && _focusedElement <= _lastColorIndex) {
-          _selectedColorIndex = _focusedElement - _firstColorIndex;
+        } else if (_focusedElement == _photoCircleIndex) {
+          _openPhotoPicker();
+        } else if (_focusedElement == _colorCircleIndex) {
+          _openColorPicker();
         } else if (_focusedElement == _deleteIndex) {
           _doDelete();
         } else if (_focusedElement == _cancelIndex) {
@@ -3024,16 +3272,16 @@ class _UserDialogState extends State<_UserDialog> {
       }
 
       if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
-        if (_focusedElement >= _firstColorIndex && _focusedElement < _lastColorIndex) {
-          _focusedElement++;
-        } else if (widget.canDelete && _focusedElement == _deleteIndex) {
+        if (_focusedElement == _photoCircleIndex) {
+          _focusedElement = _colorCircleIndex;
+        } else if (_focusedElement == _deleteIndex) {
           _focusedElement = _cancelIndex;
         } else if (_focusedElement == _cancelIndex) {
           _focusedElement = _saveIndex;
         }
       } else if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-        if (_focusedElement > _firstColorIndex && _focusedElement <= _lastColorIndex) {
-          _focusedElement--;
+        if (_focusedElement == _colorCircleIndex && widget.availablePhotos.isNotEmpty) {
+          _focusedElement = _photoCircleIndex;
         } else if (_focusedElement == _saveIndex) {
           _focusedElement = _cancelIndex;
         } else if (_focusedElement == _cancelIndex && widget.canDelete) {
@@ -3041,27 +3289,379 @@ class _UserDialogState extends State<_UserDialog> {
         }
       } else if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
         if (_focusedElement == 0) {
-          _focusedElement = _firstColorIndex;
-        } else if (_focusedElement >= _firstColorIndex && _focusedElement <= _lastColorIndex) {
-          final colorIndex = _focusedElement - _firstColorIndex;
-          const colorsPerRow = 7;
-          if (colorIndex + colorsPerRow < availableColors.length) {
-            _focusedElement += colorsPerRow;
-          } else {
-            _focusedElement = _saveIndex;
-          }
+          _focusedElement = widget.availablePhotos.isNotEmpty ? _photoCircleIndex : _colorCircleIndex;
+        } else if (_focusedElement == _photoCircleIndex || _focusedElement == _colorCircleIndex) {
+          _focusedElement = _saveIndex;
         }
       } else if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-        if (_focusedElement >= _firstColorIndex && _focusedElement <= _lastColorIndex) {
-          final colorIndex = _focusedElement - _firstColorIndex;
-          const colorsPerRow = 7;
-          if (colorIndex - colorsPerRow >= 0) {
-            _focusedElement -= colorsPerRow;
-          } else {
-            _focusedElement = 0;
-          }
-        } else if (_focusedElement == _deleteIndex || _focusedElement == _cancelIndex || _focusedElement == _saveIndex) {
-          _focusedElement = _lastColorIndex;
+        if (_focusedElement == _photoCircleIndex || _focusedElement == _colorCircleIndex) {
+          _focusedElement = 0;
+        } else if (_focusedElement >= _deleteIndex) {
+          _focusedElement = _colorCircleIndex;
+        }
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final selectedColor = availableColors[_selectedColorIndex];
+
+    return KeyboardListener(
+      focusNode: _focusNode,
+      autofocus: true,
+      onKeyEvent: _handleKeyEvent,
+      child: Dialog(
+        backgroundColor: const Color(0xFF2A2A4E),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: Container(
+          width: 400,
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(_title, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white)),
+              const SizedBox(height: 24),
+              // Name field
+              GestureDetector(
+                onTap: () {
+                  setState(() {
+                    _focusedElement = 0;
+                    _isTextFieldFocused = true;
+                    _textFieldFocusNode.requestFocus();
+                  });
+                },
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(4),
+                    border: (_focusedElement == 0 || _isTextFieldFocused) ? Border.all(color: Colors.blue, width: 2) : null,
+                  ),
+                  child: TextField(
+                    controller: _nameController,
+                    focusNode: _textFieldFocusNode,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: const InputDecoration(labelText: 'Name', border: OutlineInputBorder()),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 32),
+              // Photo and Color circles
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  if (widget.availablePhotos.isNotEmpty) ...[
+                    _AvatarPickerCircle(
+                      label: 'Photo',
+                      isFocused: _focusedElement == _photoCircleIndex,
+                      isActive: _selectedPhoto != null,
+                      onTap: _openPhotoPicker,
+                      child: _selectedPhoto != null
+                          ? ClipOval(
+                              child: Image.file(
+                                File('${getAssetDirectory()}/images/profile-photos/$_selectedPhoto'),
+                                fit: BoxFit.cover,
+                                width: 80,
+                                height: 80,
+                              ),
+                            )
+                          : const Icon(Icons.photo, color: Colors.white54, size: 32),
+                    ),
+                    const SizedBox(width: 32),
+                  ],
+                  _AvatarPickerCircle(
+                    label: 'Color',
+                    isFocused: _focusedElement == _colorCircleIndex,
+                    isActive: _selectedPhoto == null,
+                    onTap: _openColorPicker,
+                    backgroundColor: selectedColor,
+                    child: Text(
+                      _nameController.text.isNotEmpty ? _nameController.text[0].toUpperCase() : '?',
+                      style: TextStyle(
+                        fontSize: 32,
+                        fontWeight: FontWeight.bold,
+                        color: selectedColor.computeLuminance() > 0.5 ? Colors.black : Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 32),
+              // Buttons
+              Row(
+                children: [
+                  if (widget.canDelete)
+                    _DialogButton(label: 'Delete', isFocused: _focusedElement == _deleteIndex, isDanger: true, onTap: _doDelete),
+                  const Spacer(),
+                  _DialogButton(label: 'Cancel', isFocused: _focusedElement == _cancelIndex, onTap: () => Navigator.pop(context)),
+                  const SizedBox(width: 16),
+                  _DialogButton(label: _saveButtonLabel, isFocused: _focusedElement == _saveIndex, isPrimary: true, onTap: _doSave),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// Circle widget for photo/color picker in user dialog
+class _AvatarPickerCircle extends StatelessWidget {
+  final String label;
+  final bool isFocused;
+  final bool isActive;
+  final VoidCallback onTap;
+  final Color? backgroundColor;
+  final Widget child;
+
+  const _AvatarPickerCircle({
+    required this.label,
+    required this.isFocused,
+    required this.isActive,
+    required this.onTap,
+    this.backgroundColor,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        children: [
+          Container(
+            width: 80,
+            height: 80,
+            decoration: BoxDecoration(
+              color: backgroundColor ?? Colors.white12,
+              shape: BoxShape.circle,
+              border: isFocused
+                  ? Border.all(color: Colors.blue, width: 3)
+                  : isActive
+                      ? Border.all(color: Colors.white, width: 3)
+                      : Border.all(color: Colors.white24, width: 2),
+              boxShadow: isFocused ? [BoxShadow(color: Colors.blue.withOpacity(0.5), blurRadius: 8)] : null,
+            ),
+            child: Center(child: child),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(label, style: TextStyle(color: isActive ? Colors.white : Colors.white54)),
+              if (isActive) ...[
+                const SizedBox(width: 4),
+                const Icon(Icons.check, color: Colors.green, size: 16),
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// Photo picker modal
+class _PhotoPickerDialog extends StatefulWidget {
+  final List<String> availablePhotos;
+  final String? selectedPhoto;
+
+  const _PhotoPickerDialog({required this.availablePhotos, this.selectedPhoto});
+
+  @override
+  State<_PhotoPickerDialog> createState() => _PhotoPickerDialogState();
+}
+
+class _PhotoPickerDialogState extends State<_PhotoPickerDialog> {
+  static const _itemsPerRow = 4;
+  static const _itemSize = 80.0;
+  static const _itemSpacing = 16.0;
+
+  final _focusNode = FocusNode();
+  final _scrollController = ScrollController();
+  late int _selectedIndex;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedIndex = widget.selectedPhoto != null
+        ? widget.availablePhotos.indexOf(widget.selectedPhoto!)
+        : 0;
+    if (_selectedIndex < 0) _selectedIndex = 0;
+  }
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _scrollToSelected() {
+    if (!_scrollController.hasClients) return;
+
+    // Calculate actual cell size from grid (container width - padding - spacing) / columns
+    // Container: 500px, padding: 48px (24*2), spacing: 48px (16*3 gaps)
+    const containerContentWidth = 500.0 - 48.0;
+    const actualCellSize = (containerContentWidth - (_itemsPerRow - 1) * _itemSpacing) / _itemsPerRow;
+    final rowHeight = actualCellSize + _itemSpacing;
+
+    final row = _selectedIndex ~/ _itemsPerRow;
+    final targetOffset = row * rowHeight;
+
+    // Get visible range
+    final viewportHeight = _scrollController.position.viewportDimension;
+    final currentOffset = _scrollController.offset;
+    final maxOffset = _scrollController.position.maxScrollExtent;
+
+    // Scroll if selected item is outside visible area
+    if (targetOffset < currentOffset) {
+      _scrollController.animateTo(targetOffset, duration: const Duration(milliseconds: 150), curve: Curves.easeOut);
+    } else if (targetOffset + actualCellSize > currentOffset + viewportHeight) {
+      final scrollTo = (targetOffset + actualCellSize - viewportHeight + _itemSpacing).clamp(0.0, maxOffset);
+      _scrollController.animateTo(scrollTo, duration: const Duration(milliseconds: 150), curve: Curves.easeOut);
+    }
+  }
+
+  void _handleKeyEvent(KeyEvent event) {
+    if (event is! KeyDownEvent) return;
+
+    int newIndex = _selectedIndex;
+
+    if (event.logicalKey == LogicalKeyboardKey.escape) {
+      Navigator.pop(context);
+      return;
+    } else if (event.logicalKey == LogicalKeyboardKey.enter) {
+      Navigator.pop(context, widget.availablePhotos[_selectedIndex]);
+      return;
+    } else if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+      if (_selectedIndex < widget.availablePhotos.length - 1) newIndex++;
+    } else if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+      if (_selectedIndex > 0) newIndex--;
+    } else if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+      if (_selectedIndex + _itemsPerRow < widget.availablePhotos.length) {
+        newIndex += _itemsPerRow;
+      }
+    } else if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+      if (_selectedIndex - _itemsPerRow >= 0) {
+        newIndex -= _itemsPerRow;
+      }
+    }
+
+    if (newIndex != _selectedIndex) {
+      setState(() => _selectedIndex = newIndex);
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToSelected());
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return KeyboardListener(
+      focusNode: _focusNode,
+      autofocus: true,
+      onKeyEvent: _handleKeyEvent,
+      child: Dialog(
+        backgroundColor: const Color(0xFF2A2A4E),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: Container(
+          width: 500,
+          constraints: const BoxConstraints(maxHeight: 500),
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Choose Photo', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white)),
+              const SizedBox(height: 24),
+              Flexible(
+                child: GridView.builder(
+                  controller: _scrollController,
+                  shrinkWrap: true,
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: _itemsPerRow,
+                    crossAxisSpacing: _itemSpacing,
+                    mainAxisSpacing: _itemSpacing,
+                  ),
+                  itemCount: widget.availablePhotos.length,
+                  itemBuilder: (context, index) {
+                    final photoPath = widget.availablePhotos[index];
+                    final isSelected = _selectedIndex == index;
+                    return GestureDetector(
+                      onTap: () => Navigator.pop(context, photoPath),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: isSelected
+                              ? Border.all(color: Colors.blue, width: 3)
+                              : Border.all(color: Colors.white24, width: 2),
+                          boxShadow: isSelected ? [BoxShadow(color: Colors.blue.withOpacity(0.5), blurRadius: 8)] : null,
+                        ),
+                        child: ClipOval(
+                          child: Image.file(
+                            File('${getAssetDirectory()}/images/profile-photos/$photoPath'),
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// Color picker modal
+class _ColorPickerDialog extends StatefulWidget {
+  final int selectedColorIndex;
+
+  const _ColorPickerDialog({required this.selectedColorIndex});
+
+  @override
+  State<_ColorPickerDialog> createState() => _ColorPickerDialogState();
+}
+
+class _ColorPickerDialogState extends State<_ColorPickerDialog> {
+  final _focusNode = FocusNode();
+  late int _selectedIndex;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedIndex = widget.selectedColorIndex;
+  }
+
+  @override
+  void dispose() {
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  void _handleKeyEvent(KeyEvent event) {
+    if (event is! KeyDownEvent) return;
+    const itemsPerRow = 7;
+
+    setState(() {
+      if (event.logicalKey == LogicalKeyboardKey.escape) {
+        Navigator.pop(context);
+      } else if (event.logicalKey == LogicalKeyboardKey.enter) {
+        Navigator.pop(context, _selectedIndex);
+      } else if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+        if (_selectedIndex < availableColors.length - 1) _selectedIndex++;
+      } else if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+        if (_selectedIndex > 0) _selectedIndex--;
+      } else if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+        if (_selectedIndex + itemsPerRow < availableColors.length) {
+          _selectedIndex += itemsPerRow;
+        }
+      } else if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+        if (_selectedIndex - itemsPerRow >= 0) {
+          _selectedIndex -= itemsPerRow;
         }
       }
     });
@@ -3083,113 +3683,30 @@ class _UserDialogState extends State<_UserDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                _title,
-                style: const TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
-              ),
+              const Text('Choose Color', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white)),
               const SizedBox(height: 24),
-              GestureDetector(
-                onTap: () {
-                  setState(() {
-                    _focusedElement = 0;
-                    _isTextFieldFocused = true;
-                    _textFieldFocusNode.requestFocus();
-                  });
-                },
-                child: Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(4),
-                    border: (_focusedElement == 0 || _isTextFieldFocused)
-                        ? Border.all(color: Colors.blue, width: 2)
-                        : null,
-                    boxShadow: _focusedElement == 0 && !_isTextFieldFocused
-                        ? [BoxShadow(color: Colors.blue.withOpacity(0.3), blurRadius: 8)]
-                        : null,
-                  ),
-                  child: TextField(
-                    controller: _nameController,
-                    focusNode: _textFieldFocusNode,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: const InputDecoration(
-                      labelText: 'Name',
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 24),
-              const Text('Color', style: TextStyle(color: Colors.white70)),
-              const SizedBox(height: 8),
               Wrap(
-                spacing: 8,
-                runSpacing: 8,
+                spacing: 12,
+                runSpacing: 12,
                 children: List.generate(availableColors.length, (index) {
                   final color = availableColors[index];
-                  final isSelected = _selectedColorIndex == index;
-                  final isFocused = _focusedElement == index + _firstColorIndex;
+                  final isSelected = _selectedIndex == index;
                   return GestureDetector(
-                    onTap: () {
-                      setState(() {
-                        _selectedColorIndex = index;
-                        _focusedElement = index + _firstColorIndex;
-                        _isTextFieldFocused = false;
-                        _textFieldFocusNode.unfocus();
-                      });
-                    },
+                    onTap: () => Navigator.pop(context, index),
                     child: Container(
-                      width: 40,
-                      height: 40,
+                      width: 44,
+                      height: 44,
                       decoration: BoxDecoration(
                         color: color,
-                        borderRadius: BorderRadius.circular(8),
-                        border: isFocused
+                        shape: BoxShape.circle,
+                        border: isSelected
                             ? Border.all(color: Colors.blue, width: 3)
-                            : isSelected
-                                ? Border.all(color: Colors.white, width: 3)
-                                : Border.all(color: Colors.white24, width: 1),
-                        boxShadow: isFocused
-                            ? [BoxShadow(color: Colors.blue.withOpacity(0.5), blurRadius: 8)]
-                            : null,
+                            : Border.all(color: Colors.white24, width: 2),
+                        boxShadow: isSelected ? [BoxShadow(color: Colors.blue.withOpacity(0.5), blurRadius: 8)] : null,
                       ),
-                      child: isSelected
-                          ? Icon(Icons.check,
-                              color: color.computeLuminance() > 0.5
-                                  ? Colors.black
-                                  : Colors.white,
-                              size: 20)
-                          : null,
                     ),
                   );
                 }),
-              ),
-              const SizedBox(height: 32),
-              Row(
-                children: [
-                  if (widget.canDelete)
-                    _DialogButton(
-                      label: 'Delete',
-                      isFocused: _focusedElement == _deleteIndex,
-                      isDanger: true,
-                      onTap: _doDelete,
-                    ),
-                  const Spacer(),
-                  _DialogButton(
-                    label: 'Cancel',
-                    isFocused: _focusedElement == _cancelIndex,
-                    onTap: () => Navigator.pop(context),
-                  ),
-                  const SizedBox(width: 16),
-                  _DialogButton(
-                    label: _saveButtonLabel,
-                    isFocused: _focusedElement == _saveIndex,
-                    isPrimary: true,
-                    onTap: _doSave,
-                  ),
-                ],
               ),
             ],
           ),

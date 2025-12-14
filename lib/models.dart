@@ -154,36 +154,50 @@ class PlaylistItem {
 class UserProfile {
   final String id;           // Unique identifier (folder name, sanitized)
   final String displayName;  // Name shown in UI
-  final int colorValue;      // Avatar/tile color
+  final int colorValue;      // Avatar/tile color (used if no photo)
+  final String? photoPath;   // Profile photo filename (relative to profile-photos dir)
+  final int order;           // Display order (lower = first)
 
   const UserProfile({
     required this.id,
     required this.displayName,
     required this.colorValue,
+    this.photoPath,
+    this.order = 0,
   });
 
   Color get color => Color(colorValue);
+  bool get hasPhoto => photoPath != null && photoPath!.isNotEmpty;
 
   Map<String, dynamic> toJson() => {
     'id': id,
     'displayName': displayName,
     'colorValue': colorValue,
+    'order': order,
+    if (photoPath != null) 'photoPath': photoPath,
   };
 
   factory UserProfile.fromJson(Map<String, dynamic> json) => UserProfile(
     id: json['id'] as String,
     displayName: json['displayName'] as String,
     colorValue: json['colorValue'] as int,
+    photoPath: json['photoPath'] as String?,
+    order: json['order'] as int? ?? 0,
   );
 
   UserProfile copyWith({
     String? id,
     String? displayName,
     int? colorValue,
+    String? photoPath,
+    bool clearPhoto = false,
+    int? order,
   }) => UserProfile(
     id: id ?? this.id,
     displayName: displayName ?? this.displayName,
     colorValue: colorValue ?? this.colorValue,
+    photoPath: clearPhoto ? null : (photoPath ?? this.photoPath),
+    order: order ?? this.order,
   );
 
   /// Sanitize a display name to create a valid folder name

@@ -223,45 +223,100 @@ class ServiceDataStore {
 
 // Profile management for multi-user support
 class ProfileManager {
-  static String get _profilesPath => '$_appSupportDir/profiles.json';
+  static String get _legacyProfilesPath => '$_appSupportDir/profiles.json';
   static String get _profilesDir => '$_appSupportDir/profiles';
 
-  /// Load all user profiles from profiles.json
+  /// Load all user profiles by scanning profile directories
   static Future<List<UserProfile>> loadProfiles() async {
-    await initAppSupportDir(); // Ensure _appSupportDir is initialized
-    final file = File(_profilesPath);
-    if (!await file.exists()) {
+    await initAppSupportDir();
+
+    // Migrate from old profiles.json format if it exists
+    await _migrateLegacyProfiles();
+
+    final profilesDir = Directory(_profilesDir);
+    if (!await profilesDir.exists()) {
       return [];
     }
+
+    final profiles = <UserProfile>[];
+    await for (final entity in profilesDir.list()) {
+      if (entity is Directory) {
+        final profileFile = File('${entity.path}/profile.json');
+        if (await profileFile.exists()) {
+          try {
+            final contents = await profileFile.readAsString();
+            final json = jsonDecode(contents) as Map<String, dynamic>;
+            profiles.add(UserProfile.fromJson(json));
+          } catch (e) {
+            debugPrint('Failed to load profile from ${entity.path}: $e');
+          }
+        }
+      }
+    }
+
+    // Sort by order field for user-defined ordering
+    profiles.sort((a, b) => a.order.compareTo(b.order));
+    return profiles;
+  }
+
+  /// Migrate from old profiles.json to per-profile storage
+  static Future<void> _migrateLegacyProfiles() async {
+    final legacyFile = File(_legacyProfilesPath);
+    if (!await legacyFile.exists()) return;
+
     try {
-      final contents = await file.readAsString();
+      final contents = await legacyFile.readAsString();
       final decoded = jsonDecode(contents) as List<dynamic>;
-      return decoded.map((e) => UserProfile.fromJson(e as Map<String, dynamic>)).toList();
+      for (final item in decoded) {
+        final profile = UserProfile.fromJson(item as Map<String, dynamic>);
+        await saveProfile(profile);
+      }
+      await legacyFile.delete();
+      Log.write('Migrated ${decoded.length} profiles from legacy format');
     } catch (e) {
-      debugPrint('Failed to load profiles: $e');
-      return [];
+      debugPrint('Failed to migrate legacy profiles: $e');
     }
   }
 
-  /// Save all user profiles to profiles.json
-  static Future<void> saveProfiles(List<UserProfile> profiles) async {
+  /// Save a single profile to its profile.json
+  static Future<void> saveProfile(UserProfile profile) async {
     await initAppSupportDir();
-    final file = File(_profilesPath);
-    final json = profiles.map((p) => p.toJson()).toList();
-    await file.writeAsString(jsonEncode(json));
+    final profileDir = Directory(getProfileDirectory(profile));
+    if (!await profileDir.exists()) {
+      await profileDir.create(recursive: true);
+    }
+    final profileFile = File('${profileDir.path}/profile.json');
+    await profileFile.writeAsString(jsonEncode(profile.toJson()));
+  }
+
+  /// Save multiple profiles (e.g., after reordering)
+  static Future<void> saveProfiles(List<UserProfile> profiles) async {
+    for (final profile in profiles) {
+      await saveProfile(profile);
+    }
   }
 
   /// Create a new profile and its directory structure
-  static Future<UserProfile> createProfile(String displayName, int colorValue) async {
+  static Future<UserProfile> createProfile(String displayName, int colorValue, {String? photoPath, int? order}) async {
     await initAppSupportDir();
 
     // Generate unique ID from display name
     var id = UserProfile.sanitizeId(displayName);
     if (id.isEmpty) id = 'user';
 
-    // Ensure uniqueness by appending number if needed
-    final profiles = await loadProfiles();
-    final existingIds = profiles.map((p) => p.id).toSet();
+    // Ensure uniqueness by checking existing directories and count profiles for order
+    final profilesDir = Directory(_profilesDir);
+    final existingIds = <String>{};
+    var profileCount = 0;
+    if (await profilesDir.exists()) {
+      await for (final entity in profilesDir.list()) {
+        if (entity is Directory) {
+          existingIds.add(entity.path.split('/').last);
+          profileCount++;
+        }
+      }
+    }
+
     var uniqueId = id;
     var counter = 1;
     while (existingIds.contains(uniqueId)) {
@@ -273,33 +328,22 @@ class ProfileManager {
       id: uniqueId,
       displayName: displayName,
       colorValue: colorValue,
+      photoPath: photoPath,
+      order: order ?? profileCount, // New profiles go to the end
     );
 
-    // Create profile directory
-    final profileDir = Directory(getProfileDirectory(profile));
-    if (!await profileDir.exists()) {
-      await profileDir.create(recursive: true);
-    }
-
-    // Save updated profiles list
-    profiles.add(profile);
-    await saveProfiles(profiles);
+    // Save profile.json
+    await saveProfile(profile);
 
     return profile;
   }
 
-  /// Delete a profile and optionally its directory
-  static Future<void> deleteProfile(String id, {bool deleteFiles = true}) async {
+  /// Delete a profile directory
+  static Future<void> deleteProfile(String id) async {
     await initAppSupportDir();
-    final profiles = await loadProfiles();
-    profiles.removeWhere((p) => p.id == id);
-    await saveProfiles(profiles);
-
-    if (deleteFiles) {
-      final profileDir = Directory('$_profilesDir/$id');
-      if (await profileDir.exists()) {
-        await profileDir.delete(recursive: true);
-      }
+    final profileDir = Directory('$_profilesDir/$id');
+    if (await profileDir.exists()) {
+      await profileDir.delete(recursive: true);
     }
   }
 

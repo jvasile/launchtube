@@ -149,3 +149,7 @@ scoop install flutter
 
 You *can* develop on the WSL side but build and run on the Windows side.  This
 is what I do.  There are many ways to accomplish this.
+
+## Thanks
+
+  * [Pixabay](https://pixabay.com/images/search/animals) for all the animal photos in the profile pics under an easy license.

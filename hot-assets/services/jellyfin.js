@@ -1106,22 +1106,8 @@
             }
         }
 
-        // On settings/menu pages, prioritize first menu item
+        // First try to select a visible card (main content)
         if (!hasAutoSelected) {
-            const menuItems = document.querySelectorAll('a.listItem-border.emby-button:not(.hide), .navMenuOption, .sidebarLink, .listItem-button');
-            for (const menuItem of menuItems) {
-                const rect = menuItem.getBoundingClientRect();
-                if (rect.width > 0 && rect.height > 0 && rect.top < window.innerHeight) {
-                    hasAutoSelected = true;
-                    selectElement(menuItem);
-                    serverLog('Auto-selected first menu item');
-                    return;
-                }
-            }
-        }
-
-        // On non-detail pages (no visible play button), prioritize first visible card
-        if (!hasVisiblePlayBtn && !hasAutoSelected) {
             const cards = Array.from(document.querySelectorAll('.card')).filter(card => {
                 if (card.closest('.detailImageContainer')) return false;
                 const rect = card.getBoundingClientRect();
@@ -1132,6 +1118,20 @@
                 selectElement(cards[0]);
                 serverLog('Auto-selected first card');
                 return;
+            }
+        }
+
+        // On settings/menu pages (no cards), prioritize first menu item
+        if (!hasAutoSelected) {
+            const menuItems = document.querySelectorAll('a.listItem-border.emby-button:not(.hide), .navMenuOption, .sidebarLink, .listItem-button');
+            for (const menuItem of menuItems) {
+                const rect = menuItem.getBoundingClientRect();
+                if (rect.width > 0 && rect.height > 0 && rect.top < window.innerHeight) {
+                    hasAutoSelected = true;
+                    selectElement(menuItem);
+                    serverLog('Auto-selected first menu item');
+                    return;
+                }
             }
         }
 
@@ -1205,8 +1205,17 @@
         setTimeout(autoSelectFirst, 300);
     });
 
-    // Initial auto-select
-    setTimeout(autoSelectFirst, 500);
+    // Initial auto-select with retry
+    let autoSelectRetries = 0;
+    function tryAutoSelect() {
+        autoSelectFirst();
+        // If nothing selected and we haven't retried too many times, try again
+        if (!selectedElement && autoSelectRetries < 5) {
+            autoSelectRetries++;
+            setTimeout(tryAutoSelect, 500);
+        }
+    }
+    setTimeout(tryAutoSelect, 500);
 
     // Debug: Log card structure when pressing Ctrl+I
     function logCardStructure() {

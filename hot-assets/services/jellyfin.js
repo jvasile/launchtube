@@ -778,15 +778,15 @@
     navStyle.textContent = `
         /* Main page cards - inset shadow on image container */
         .launchtube-selected .cardImageContainer {
-            box-shadow: inset 0 0 0 4px #00a4dc, inset 0 0 0 6px #fff !important;
+            box-shadow: inset 0 0 0 0.25vw #00a4dc, inset 0 0 0 0.45vw #000 !important;
         }
         /* Dashboard cards (inside MUI drawer layout) - outer shadow since cardImageContainer doesn't work well */
         .MuiBox-root .launchtube-selected.card {
-            box-shadow: 0 0 0 3px #00a4dc !important;
+            box-shadow: 0 0 0 0.3vw #00a4dc, 0 0 0 0.5vw #000 !important;
         }
         .launchtube-nav-highlight {
-            box-shadow: inset 0 0 0 3px #00a4dc !important;
-            background-color: rgba(0, 164, 220, 0.2) !important;
+            box-shadow: inset 0 0 0 4px #00a4dc !important;
+            background-color: rgba(0, 164, 220, 0.3) !important;
         }
         .alphaPickerButton.launchtube-nav-highlight {
             background-color: #00a4dc !important;
@@ -867,8 +867,10 @@
             // Skip poster card on detail pages - clicking it does nothing
             if (card.closest('.detailImageContainer')) return;
             seen.add(card);
+            // Include cards slightly off-screen in both directions for smooth scrolling navigation
             const maxTop = includeBelow ? window.innerHeight * 2 : window.innerHeight;
-            if (rect.top < maxTop && rect.bottom > 0) {
+            const minBottom = includeBelow ? -window.innerHeight : 0;
+            if (rect.top < maxTop && rect.bottom > minBottom) {
                 elements.push({ el: card, rect, type: 'card' });
             }
         });
@@ -1002,7 +1004,7 @@
         const currentCenterX = currentRect.left + currentRect.width / 2;
         const currentCenterY = currentRect.top + currentRect.height / 2;
         const currentIsAlpha = selectedElement.classList.contains('alphaPickerButton');
-        const currentIsCard = selectedElement.classList.contains('card');
+        const currentIsCard = selectedElement.classList.contains('card') || !!selectedElement.closest('.card');
         const currentIsSidebar = selectedElement.classList.contains('MuiListItemButton-root');
 
         let bestElement = null;
@@ -1021,8 +1023,26 @@
                 return; // Skip non-sidebar elements for up/down when on sidebar
             }
 
-            // Check vertical overlap for left/right navigation
+            // Alpha picker is ONLY reachable via Right arrow, exits via Left arrow
+            // Never navigate to alpha picker with up/down from anywhere
+            if (isAlpha && (direction === 'up' || direction === 'down')) {
+                return; // Skip alpha picker for all up/down navigation
+            }
+
+            // When on alpha picker, up/down stays within alpha picker, left/right exits
+            if (currentIsAlpha && !isAlpha && (direction === 'up' || direction === 'down')) {
+                return; // Skip non-alpha elements for up/down when on alpha picker
+            }
+
+            // When on a card navigating up/down, strongly prefer other cards over navbar
+            // Navbar is only reachable from the top row when no cards are above
+            const isNav = type === 'nav';
+            const navPenalty = (currentIsCard && isNav && (direction === 'up' || direction === 'down')) ? 10000 : 0;
+
+            // Check overlap for grid navigation
             const hasVerticalOverlap = currentRect.top < rect.bottom && currentRect.bottom > rect.top;
+            const hasHorizontalOverlap = currentRect.left < rect.right && currentRect.right > rect.left;
+            const isCard = type === 'card';
 
             let isValidDirection = false;
             switch (direction) {
@@ -1047,10 +1067,20 @@
                     }
                     break;
                 case 'up':
-                    isValidDirection = centerY < currentCenterY - 10;
+                    // For card-to-card navigation, require horizontal overlap (same column)
+                    if (currentIsCard && isCard) {
+                        isValidDirection = centerY < currentCenterY - 10 && hasHorizontalOverlap;
+                    } else {
+                        isValidDirection = centerY < currentCenterY - 10;
+                    }
                     break;
                 case 'down':
-                    isValidDirection = centerY > currentCenterY + 10;
+                    // For card-to-card navigation, require horizontal overlap (same column)
+                    if (currentIsCard && isCard) {
+                        isValidDirection = centerY > currentCenterY + 10 && hasHorizontalOverlap;
+                    } else {
+                        isValidDirection = centerY > currentCenterY + 10;
+                    }
                     break;
             }
 
@@ -1064,6 +1094,9 @@
                 } else {
                     distance = Math.abs(centerX - currentCenterX) + Math.abs(centerY - currentCenterY) * 10;
                 }
+
+                // Apply navbar penalty so cards are preferred over navbar when navigating up/down
+                distance += navPenalty;
 
                 if (distance < bestDistance) {
                     bestDistance = distance;

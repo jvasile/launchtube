@@ -906,6 +906,19 @@
             }
         });
 
+        // Pager controls (next/previous page buttons at bottom of grids)
+        document.querySelectorAll('.btnNextPage, .btnPreviousPage, .paging button, [data-action="nextpage"], [data-action="previouspage"]').forEach(btn => {
+            const rect = btn.getBoundingClientRect();
+            if (rect.width === 0 || rect.height === 0) return;
+            const style = window.getComputedStyle(btn);
+            if (style.opacity === '0' || style.visibility === 'hidden' || style.display === 'none') return;
+            if (seen.has(btn)) return;
+            seen.add(btn);
+            if (rect.top < window.innerHeight && rect.bottom > 0) {
+                elements.push({ el: btn, rect, type: 'pager' });
+            }
+        });
+
         // Settings/form elements (for dashboard settings pages)
         // Only include if we're on a dashboard/settings page to avoid cluttering normal navigation
         const isDashboardPage = window.location.hash.includes('/dashboard') ||
@@ -1074,27 +1087,19 @@
                     }
                     break;
                 case 'up':
-                    // For card-to-card navigation, require horizontal overlap (same column)
-                    if (currentIsCard && isCard) {
-                        isValidDirection = centerY < currentCenterY - 10 && hasHorizontalOverlap;
-                    } else {
-                        isValidDirection = centerY < currentCenterY - 10;
-                    }
+                    isValidDirection = centerY < currentCenterY - 10;
                     break;
                 case 'down':
-                    // For card-to-card navigation, require horizontal overlap (same column)
-                    if (currentIsCard && isCard) {
-                        isValidDirection = centerY > currentCenterY + 10 && hasHorizontalOverlap;
-                    } else {
-                        isValidDirection = centerY > currentCenterY + 10;
-                    }
+                    isValidDirection = centerY > currentCenterY + 10;
                     break;
             }
 
             if (isValidDirection) {
                 let distance;
                 if (direction === 'up' || direction === 'down') {
-                    distance = Math.abs(centerY - currentCenterY) + Math.abs(centerX - currentCenterX) * 0.1;
+                    // Prefer cards in same column (horizontal overlap) but allow fallback to other columns
+                    const columnPenalty = (currentIsCard && isCard && !hasHorizontalOverlap) ? 500 : 0;
+                    distance = Math.abs(centerY - currentCenterY) + Math.abs(centerX - currentCenterX) * 0.1 + columnPenalty;
                 } else if ((currentIsAlpha && !isAlpha) || (isAlpha && !currentIsAlpha) || (currentIsSidebar && !isSidebar)) {
                     // When navigating to/from alpha picker or sidebar, prioritize vertical proximity
                     distance = Math.abs(centerY - currentCenterY) + Math.abs(centerX - currentCenterX) * 0.5;

@@ -778,19 +778,26 @@
     navStyle.textContent = `
         /* Main page cards - inset shadow on image container */
         .launchtube-selected .cardImageContainer {
-            box-shadow: inset 0 0 0 0.25vw #00a4dc, inset 0 0 0 0.45vw #000 !important;
+            box-shadow: inset 0 0 0 0.25vw #ffeb3b, inset 0 0 0 0.45vw #000 !important;
+        }
+        /* Card text - dark text on bright yellow background when selected */
+        .launchtube-selected .cardText,
+        .launchtube-selected .cardTextCentered {
+            background-color: #ffeb3b !important;
+            color: #000 !important;
+            font-weight: bold !important;
         }
         /* Dashboard cards (inside MUI drawer layout) - outer shadow since cardImageContainer doesn't work well */
         .MuiBox-root .launchtube-selected.card {
-            box-shadow: 0 0 0 0.3vw #00a4dc, 0 0 0 0.5vw #000 !important;
+            box-shadow: 0 0 0 0.3vw #ffeb3b, 0 0 0 0.5vw #000 !important;
         }
         .launchtube-nav-highlight {
-            box-shadow: inset 0 0 0 4px #00a4dc !important;
-            background-color: rgba(0, 164, 220, 0.3) !important;
+            box-shadow: inset 0 0 0 4px #ffeb3b !important;
+            background-color: rgba(255, 235, 59, 0.3) !important;
         }
         .alphaPickerButton.launchtube-nav-highlight {
-            background-color: #00a4dc !important;
-            color: #fff !important;
+            background-color: #ffeb3b !important;
+            color: #000 !important;
         }
     `;
     document.head.appendChild(navStyle);

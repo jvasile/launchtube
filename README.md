@@ -152,4 +152,18 @@ is what I do.  There are many ways to accomplish this.
 
 ## Thanks
 
-  * [Pixabay](https://pixabay.com/images/search/animals) for all the animal photos in the profile pics under an easy license.
+  * [Pixabay](https://pixabay.com/images/search/animals) for all the animal
+    photos in the profile pics under an easy license.  Although the code in this
+    repo is open source, these pictures use the [pixabay
+    license](https://pixabay.com/service/license-summary/).
+
+## License
+
+The code in this repo is licensed under AGPLv3.  If you want to do something
+with it that requires a more permissive license, reach out.
+
+The profile pictures are from pixabay and they come with their own [pixabay
+license](https://pixabay.com/service/license-summary/).
+
+The logos in the app service cards are trademarks of their respective trademark
+owners.  They're not mine and I make no claim to them.

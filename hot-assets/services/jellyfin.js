@@ -580,6 +580,24 @@
     // Store the last clicked item ID for video.play() intercept
     let lastClickedItemId = null;
 
+    // Parse timestamp from chapter card text (e.g., "Speed Limits7:27" or "Suicide?1:00:26")
+    function parseChapterTimestamp(text) {
+        // Match timestamp at end: H:MM:SS or M:SS or MM:SS
+        const match = text.match(/(\d{1,2}):(\d{2}):(\d{2})$|(\d{1,2}):(\d{2})$/);
+        if (!match) return 0;
+
+        let seconds = 0;
+        if (match[1] !== undefined) {
+            // H:MM:SS format
+            seconds = parseInt(match[1]) * 3600 + parseInt(match[2]) * 60 + parseInt(match[3]);
+        } else {
+            // M:SS format
+            seconds = parseInt(match[4]) * 60 + parseInt(match[5]);
+        }
+        // Convert to ticks (1 second = 10,000,000 ticks)
+        return seconds * 10000000;
+    }
+
     // Intercept clicks on play buttons
     // Intercept clicks on play buttons and directly start external playback
     function attachPlayListeners() {
@@ -596,6 +614,24 @@
         ];
 
         document.addEventListener('click', async function(event) {
+            // Check for chapter card click first
+            const chapterCard = event.target.closest('.chapterCard');
+            if (chapterCard) {
+                const itemId = extractItemId(chapterCard);
+                if (itemId) {
+                    console.log('Launch Tube: Chapter card clicked, itemId:', itemId);
+                    event.preventDefault();
+                    event.stopPropagation();
+                    event.stopImmediatePropagation();
+
+                    const text = chapterCard.textContent || '';
+                    const startPositionTicks = parseChapterTimestamp(text);
+                    console.log('Launch Tube: Chapter timestamp:', text, '-> ticks:', startPositionTicks);
+                    await playExternal(itemId, startPositionTicks);
+                    return;
+                }
+            }
+
             const target = event.target.closest(playSelectors.join(','));
             if (target) {
                 const itemId = extractItemId(target);

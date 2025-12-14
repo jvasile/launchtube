@@ -42,6 +42,8 @@ class _LauncherHomeState extends State<LauncherHome> with WidgetsBindingObserver
   int _selectedIndex = 0;
   bool _moveMode = false;
   int? _moveFromIndex;
+  bool _menuSelected = false;
+  final GlobalKey<PopupMenuButtonState<String>> _menuKey = GlobalKey<PopupMenuButtonState<String>>();
   final FocusNode _focusNode = FocusNode();
   final LaunchTubeServer _server = LaunchTubeServer();
 
@@ -1017,6 +1019,29 @@ class _LauncherHomeState extends State<LauncherHome> with WidgetsBindingObserver
         return;
       }
 
+      // '=' key opens hamburger menu from anywhere
+      if (event.character == '=') {
+        _menuKey.currentState?.showButtonMenu();
+        return;
+      }
+
+      // Handle menu selected state
+      if (_menuSelected) {
+        if (event.logicalKey == LogicalKeyboardKey.arrowRight ||
+            event.logicalKey == LogicalKeyboardKey.arrowDown ||
+            event.logicalKey == LogicalKeyboardKey.escape) {
+          setState(() {
+            _menuSelected = false;
+          });
+          return;
+        } else if (event.logicalKey == LogicalKeyboardKey.enter ||
+            event.logicalKey == LogicalKeyboardKey.select) {
+          _menuKey.currentState?.showButtonMenu();
+          return;
+        }
+        return; // Ignore other keys when menu is selected
+      }
+
       setState(() {
         final totalItems = apps.length + 1; // +1 for add button
         const int columns = 4;
@@ -1049,6 +1074,9 @@ class _LauncherHomeState extends State<LauncherHome> with WidgetsBindingObserver
         } else if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
           if (_moveMode) {
             _selectedIndex = (_selectedIndex - 1).clamp(0, maxIndex);
+          } else if (_selectedIndex == 0) {
+            // At top-left, go to hamburger menu
+            _menuSelected = true;
           } else {
             _selectedIndex = (_selectedIndex - 1 + totalItems) % totalItems;
           }
@@ -1061,6 +1089,9 @@ class _LauncherHomeState extends State<LauncherHome> with WidgetsBindingObserver
         } else if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
           if (_moveMode) {
             _selectedIndex = (_selectedIndex - columns).clamp(0, maxIndex);
+          } else if (_selectedIndex < columns) {
+            // In top row, go to hamburger menu
+            _menuSelected = true;
           } else {
             _selectedIndex = (_selectedIndex - columns + totalItems) % totalItems;
           }
@@ -1144,6 +1175,7 @@ class _LauncherHomeState extends State<LauncherHome> with WidgetsBindingObserver
               _HelpRow(shortcut: 'M', description: 'Move app'),
               _HelpRow(shortcut: 'Delete', description: 'Delete app'),
               _HelpRow(shortcut: 'U', description: 'Switch user'),
+              _HelpRow(shortcut: '=', description: 'Open menu'),
               _HelpRow(shortcut: 'Escape', description: 'Cancel'),
               _HelpRow(shortcut: 'Ctrl+Shift+R', description: 'Restart app'),
               _HelpRow(shortcut: 'Ctrl+Shift+Q', description: 'Quit app'),
@@ -1374,10 +1406,19 @@ class _LauncherHomeState extends State<LauncherHome> with WidgetsBindingObserver
                   Positioned(
                     left: 20,
                     child: PopupMenuButton<String>(
-                      icon: const Icon(Icons.menu, color: Colors.white54),
-                      tooltip: 'Menu',
+                      key: _menuKey,
+                      icon: Icon(Icons.menu, color: _menuSelected ? Colors.white : Colors.white54),
+                      tooltip: 'Menu (=)',
                       color: const Color(0xFF2A2A4E),
+                      onCanceled: () {
+                        setState(() {
+                          _menuSelected = false;
+                        });
+                      },
                       onSelected: (value) {
+                        setState(() {
+                          _menuSelected = false;
+                        });
                         if (value.startsWith('admin_browser:')) {
                           final index = int.parse(value.substring('admin_browser:'.length));
                           if (index < _availableBrowsers.length) {

@@ -204,6 +204,14 @@
     // Global escape handler for when not playing
     function handleGlobalEscape(event) {
         if (event.key === 'Escape' && !modalElement && !confirmationElement) {
+            // Check if any menu, dialog, or dropdown is open - let Jellyfin handle closing it
+            const openMenu = document.querySelector('.actionSheet, .dialogContainer:not(.hide), .mainDrawer.mainDrawer-visible, .actionSheetContent, .dialogOpened, .menuOpen');
+            if (openMenu) {
+                serverLog('Escape with open menu, letting Jellyfin close it');
+                // Don't prevent default - let Jellyfin's own escape handler close the menu
+                return;
+            }
+
             event.preventDefault();
             event.stopPropagation();
 

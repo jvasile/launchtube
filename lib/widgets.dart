@@ -311,91 +311,15 @@ class _LauncherHomeState extends State<LauncherHome> with WidgetsBindingObserver
   }
 
   void _showFirstRunUserDialog() {
-    final nameController = TextEditingController();
-    Color selectedColor = availableColors[Random().nextInt(availableColors.length)];
-
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          backgroundColor: const Color(0xFF2A2A4E),
-          title: const Text('Welcome to Launch Tube!', style: TextStyle(color: Colors.white)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Create your profile to get started.',
-                style: TextStyle(color: Colors.white70),
-              ),
-              const SizedBox(height: 20),
-              TextField(
-                controller: nameController,
-                autofocus: true,
-                style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(
-                  labelText: 'Your Name',
-                  labelStyle: TextStyle(color: Colors.white70),
-                  enabledBorder: UnderlineInputBorder(
-                    borderSide: BorderSide(color: Colors.white38),
-                  ),
-                  focusedBorder: UnderlineInputBorder(
-                    borderSide: BorderSide(color: Colors.blue),
-                  ),
-                ),
-                onSubmitted: (_) async {
-                  final name = nameController.text.trim();
-                  if (name.isEmpty) return;
-                  Navigator.pop(context);
-                  await _createFirstProfile(name, selectedColor.value);
-                },
-              ),
-              const SizedBox(height: 24),
-              const Text('Pick a color', style: TextStyle(color: Colors.white70)),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: availableColors.map((color) {
-                  final isSelected = selectedColor.value == color.value;
-                  return GestureDetector(
-                    onTap: () => setDialogState(() => selectedColor = color),
-                    child: Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: color,
-                        borderRadius: BorderRadius.circular(20),
-                        border: isSelected
-                            ? Border.all(color: Colors.white, width: 3)
-                            : null,
-                      ),
-                      child: isSelected
-                          ? Icon(Icons.check,
-                              color: color.computeLuminance() > 0.5
-                                  ? Colors.black
-                                  : Colors.white,
-                              size: 20)
-                          : null,
-                    ),
-                  );
-                }).toList(),
-              ),
-            ],
-          ),
-          actions: [
-            ElevatedButton(
-              onPressed: () async {
-                final name = nameController.text.trim();
-                if (name.isEmpty) return;
-                Navigator.pop(context);
-                await _createFirstProfile(name, selectedColor.value);
-              },
-              child: const Text('Get Started'),
-            ),
-          ],
-        ),
+      builder: (context) => _UserDialog(
+        isNewUser: true,
+        availablePhotos: _availablePhotos,
+        onSave: (name, colorValue, photoPath) async {
+          await _createFirstProfile(name, colorValue, photoPath: photoPath);
+        },
       ),
     );
   }

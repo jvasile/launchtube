@@ -133,6 +133,7 @@ func (bm *BrowserManager) Launch(browserName, url, profileID string, serverPort 
 			"--disable-sync",
 			"--no-first-run",
 			"--disable-default-apps",
+			"--force-dark-mode",
 		)
 	}
 

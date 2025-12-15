@@ -376,7 +376,7 @@ func (s *Server) serveServiceScript(w http.ResponseWriter, serviceID, requestedV
 	versionedScript := fmt.Sprintf("window.LAUNCH_TUBE_VERSION = \"%s\";\n%s", version, content)
 
 	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
-	w.Header().Set("Cache-Control", "max-age=31536000")
+	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("ETag", fmt.Sprintf(`"%d"`, mtime.UnixMilli()))
 	fmt.Fprint(w, versionedScript)
 }
@@ -663,7 +663,7 @@ func (s *Server) handleUserscript(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
-	w.Header().Set("Cache-Control", "max-age=31536000")
+	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("ETag", fmt.Sprintf(`"%d"`, mtime.UnixMilli()))
 	fmt.Fprint(w, content)
 }

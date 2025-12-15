@@ -51,6 +51,14 @@
         #launchtube-nav-hint.visible {
             opacity: 1;
         }
+        /* Hide Shorts */
+        ytd-rich-shelf-renderer[is-shorts],
+        ytd-reel-shelf-renderer,
+        ytd-rich-section-renderer:has(ytd-rich-shelf-renderer[is-shorts]),
+        ytd-rich-shelf-renderer:has([href*="/shorts/"]),
+        [page-subtype="subscriptions"] ytd-rich-item-renderer:has([href*="/shorts/"]) {
+            display: none !important;
+        }
     `;
     document.head.appendChild(navStyle);
 

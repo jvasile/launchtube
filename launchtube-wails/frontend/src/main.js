@@ -1618,6 +1618,7 @@ async function addService(service) {
     imagePath: service.logoPath,
     colorValue: service.colorValue || 0xFF333333,
     showName: !service.logoPath,
+    focusAlert: service.focusAlert || false,
   };
 
   apps.push(newApp);

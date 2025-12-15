@@ -141,6 +141,7 @@ func (bm *BrowserManager) Launch(browserName, url, profileID string, serverPort 
 			"--hide-crash-restore-bubble",
 			"--disable-features=MediaRouter,GlobalMediaControls,LocalNetworkAccessChecks",
 			"--disable-device-discovery-notifications",
+			"--disable-notifications",
 			"--disable-sync",
 			"--no-first-run",
 			"--disable-default-apps",

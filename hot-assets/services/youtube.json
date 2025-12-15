@@ -2,5 +2,6 @@
   "name": "YouTube",
   "url": "https://www.youtube.com",
   "matchUrls": ["https://youtube.com"],
-  "color": "#FFFFFF"
+  "color": "#FFFFFF",
+  "focusAlert": true
 }

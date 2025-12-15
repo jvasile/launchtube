@@ -914,6 +914,7 @@ type ServiceLibraryItem struct {
 	Color      string   `json:"color"`
 	ColorValue int      `json:"colorValue"`
 	LogoPath   string   `json:"logoPath,omitempty"`
+	FocusAlert bool     `json:"focusAlert,omitempty"`
 }
 
 // handleServiceLibrary returns available streaming services
@@ -944,20 +945,22 @@ func (s *Server) handleServiceLibrary(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var raw struct {
-			Name      string   `json:"name"`
-			URL       string   `json:"url"`
-			MatchURLs []string `json:"matchUrls,omitempty"`
-			Color     string   `json:"color"`
+			Name       string   `json:"name"`
+			URL        string   `json:"url"`
+			MatchURLs  []string `json:"matchUrls,omitempty"`
+			Color      string   `json:"color"`
+			FocusAlert bool     `json:"focusAlert,omitempty"`
 		}
 		if err := json.Unmarshal(data, &raw); err != nil {
 			continue
 		}
 
 		service := ServiceLibraryItem{
-			Name:      raw.Name,
-			URL:       raw.URL,
-			MatchURLs: raw.MatchURLs,
-			Color:     raw.Color,
+			Name:       raw.Name,
+			URL:        raw.URL,
+			MatchURLs:  raw.MatchURLs,
+			Color:      raw.Color,
+			FocusAlert: raw.FocusAlert,
 		}
 
 		// Parse color

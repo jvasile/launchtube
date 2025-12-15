@@ -1114,3 +1114,251 @@ body.keyboard-mode .menu-item:hover:not(:focus) {
   outline: 2px solid #ff5252;
   outline-offset: 2px;
 }
+
+/* ========== ON-SCREEN KEYBOARD ========== */
+.osk-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+.osk-container {
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  border-radius: 2vh;
+  padding: 3vh;
+  min-width: 60vw;
+  max-width: 90vw;
+}
+
+.osk-input-preview {
+  background: rgba(255, 255, 255, 0.1);
+  border: 0.3vh solid rgba(255, 255, 255, 0.3);
+  border-radius: 1.5vh;
+  padding: 2vh 3vh;
+  margin-bottom: 3vh;
+  color: white;
+  font-size: 4vh;
+  min-height: 5vh;
+  word-break: break-all;
+}
+
+.osk-placeholder {
+  color: rgba(255, 255, 255, 0.4);
+  font-style: italic;
+}
+
+.osk-keyboard {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5vh;
+}
+
+.osk-row {
+  display: flex;
+  justify-content: center;
+  gap: 1vh;
+}
+
+.osk-key {
+  min-width: 7vh;
+  height: 7vh;
+  border: 0.3vh solid transparent;
+  border-radius: 1.5vh;
+  background: rgba(255, 255, 255, 0.15);
+  color: white;
+  font-size: 3.5vh;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.osk-key:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.osk-key:focus {
+  outline: none;
+  background: #2196F3;
+  border-color: #64B5F6;
+  transform: scale(1.15);
+  box-shadow: 0 0 0 0.6vh rgba(33, 150, 243, 0.6), 0 0 3vh rgba(33, 150, 243, 0.8);
+}
+
+.osk-special {
+  min-width: 12vh;
+  font-size: 3.5vh;
+}
+
+.osk-special.osk-active {
+  background: #4CAF50;
+}
+
+.osk-cancel {
+  background: #f44336;
+}
+
+.osk-cancel:hover {
+  background: #d32f2f;
+}
+
+.osk-cancel:focus {
+  background: #f44336;
+  border-color: #ef9a9a;
+  box-shadow: 0 0 0 0.6vh rgba(244, 67, 54, 0.6), 0 0 3vh rgba(244, 67, 54, 0.8);
+}
+
+.osk-done {
+  background: #4CAF50;
+}
+
+.osk-done:hover {
+  background: #388E3C;
+}
+
+.osk-done:focus {
+  background: #4CAF50;
+  border-color: #81C784;
+  box-shadow: 0 0 0 0.6vh rgba(76, 175, 80, 0.6), 0 0 3vh rgba(76, 175, 80, 0.8);
+}
+
+/* OSK Config */
+.osk-config {
+  min-width: 50vw;
+}
+
+.osk-config-title {
+  color: white;
+  font-size: 4vh;
+  margin-bottom: 4vh;
+  text-align: center;
+}
+
+.osk-config-section {
+  margin-bottom: 2.5vh;
+}
+
+.osk-config-label {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 2vh;
+  margin-bottom: 1.5vh;
+  text-transform: uppercase;
+}
+
+.osk-config-option {
+  display: flex;
+  align-items: center;
+  gap: 2vh;
+  color: white;
+  font-size: 3vh;
+  padding: 2vh 2.5vh;
+  margin: 1vh 0;
+  cursor: pointer;
+  border-radius: 1.5vh;
+  background: rgba(255, 255, 255, 0.05);
+  border: 0.3vh solid transparent;
+  transition: all 0.15s;
+}
+
+.osk-config-option:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.osk-config-option:focus {
+  outline: none;
+  background: #2196F3;
+  border-color: #64B5F6;
+  box-shadow: 0 0 0 0.5vh rgba(33, 150, 243, 0.5), 0 0 2vh rgba(33, 150, 243, 0.6);
+}
+
+.osk-config-radio, .osk-config-checkbox {
+  width: 3.5vh;
+  height: 3.5vh;
+  border: 0.4vh solid rgba(255, 255, 255, 0.5);
+  background: transparent;
+  flex-shrink: 0;
+}
+
+.osk-config-radio {
+  border-radius: 50%;
+}
+
+.osk-config-checkbox {
+  border-radius: 0.8vh;
+}
+
+.osk-config-radio.checked {
+  border-color: #4CAF50;
+  background: #4CAF50;
+  box-shadow: inset 0 0 0 0.8vh rgba(0, 0, 0, 0.3);
+}
+
+.osk-config-checkbox.checked {
+  border-color: #4CAF50;
+  background: #4CAF50;
+  position: relative;
+}
+
+.osk-config-checkbox.checked::after {
+  content: '✓';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: white;
+  font-size: 2.5vh;
+  font-weight: bold;
+}
+
+.osk-config-buttons {
+  display: flex;
+  justify-content: center;
+  margin-top: 3vh;
+}
+
+.osk-config-btn {
+  padding: 2vh 6vh;
+  border: 0.3vh solid transparent;
+  border-radius: 1.5vh;
+  background: #2196F3;
+  color: white;
+  font-size: 3vh;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.osk-config-btn:hover {
+  background: #1976D2;
+}
+
+.osk-config-btn:focus {
+  outline: none;
+  border-color: #64B5F6;
+  box-shadow: 0 0 0 0.5vh rgba(33, 150, 243, 0.5), 0 0 2vh rgba(33, 150, 243, 0.6);
+}
+
+/* Checkbox styling for settings */
+.checkbox-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: white;
+  font-size: 14px;
+  padding: 8px 0;
+  cursor: pointer;
+}
+
+.checkbox-option input {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}

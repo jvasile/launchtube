@@ -19,6 +19,12 @@ let moveMode = false; // For reordering apps with M key
 let profileMoveMode = false; // For reordering profiles with M key
 let keyboardMode = false; // Track if using keyboard navigation
 
+// On-screen keyboard settings
+let oskEnabled = localStorage.getItem('oskEnabled') !== 'false'; // Default enabled
+let oskLayout = localStorage.getItem('oskLayout') || 'qwerty'; // 'qwerty' or 'alpha'
+let oskFullKeyboard = localStorage.getItem('oskFullKeyboard') === 'true'; // Full keyboard with all symbols
+let oskIsOpen = false; // Track if OSK is currently open
+
 // Color palette
 const colors = [
   { name: 'Black', value: 0xFF000000 },
@@ -367,11 +373,27 @@ function showProfileEdit(profile) {
   }
 
   // Capture all keydown events to prevent bubbling to parent handlers
-  function handleDialogKey(e) {
+  async function handleDialogKey(e) {
+    // Don't handle keys if OSK is open
+    if (oskIsOpen) return;
+
     e.stopPropagation();
 
     if (e.key === 'Escape') {
       closeDialog();
+      return;
+    }
+
+    // Handle Enter on text input - show OSK if enabled
+    if (e.key === 'Enter' && document.activeElement?.tagName === 'INPUT' && document.activeElement?.type === 'text') {
+      if (oskEnabled) {
+        e.preventDefault();
+        const input = document.activeElement;
+        const result = await showOnScreenKeyboard(input);
+        input.value = result;
+        updatePreviews();
+        input.focus();
+      }
       return;
     }
 
@@ -805,6 +827,14 @@ async function showSettingsDialog() {
         </div>
       </div>
 
+      <div class="dialog-section">
+        <div class="dialog-section-title">On-Screen Keyboard</div>
+        <label class="checkbox-option">
+          <input type="checkbox" id="oskEnabledCheck" ${oskEnabled ? 'checked' : ''}>
+          <span>Enable on-screen keyboard for text input</span>
+        </label>
+      </div>
+
       <div class="dialog-buttons">
         <div class="dialog-spacer"></div>
         <button class="dialog-btn primary-btn" id="settingsCloseBtn">Close</button>
@@ -843,8 +873,33 @@ async function showSettingsDialog() {
     SetMpvOptions(e.target.value);
   });
 
-  document.getElementById('settingsCloseBtn').addEventListener('click', () => {
+  // OSK enabled
+  document.getElementById('oskEnabledCheck').addEventListener('change', (e) => {
+    oskEnabled = e.target.checked;
+    localStorage.setItem('oskEnabled', oskEnabled);
+  });
+
+  function closeSettings() {
+    document.removeEventListener('keydown', handleSettingsKey, true);
     document.body.removeChild(overlay);
+  }
+
+  function handleSettingsKey(e) {
+    e.stopPropagation();
+    if (e.key === 'Escape' || e.key === 'Enter') {
+      e.preventDefault();
+      closeSettings();
+    }
+  }
+  document.addEventListener('keydown', handleSettingsKey, true);
+
+  document.getElementById('settingsCloseBtn').addEventListener('click', closeSettings);
+
+  // Click outside dialog to close
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) {
+      closeSettings();
+    }
   });
 }
 
@@ -953,11 +1008,26 @@ function showAppEditDialog(index) {
   }
 
   // Capture all keydown events to prevent bubbling to parent handlers
-  function handleDialogKey(e) {
+  async function handleDialogKey(e) {
+    // Don't handle keys if OSK is open
+    if (oskIsOpen) return;
+
     e.stopPropagation();
 
     if (e.key === 'Escape') {
       closeDialog();
+      return;
+    }
+
+    // Handle Enter on text input - show OSK if enabled
+    if (e.key === 'Enter' && document.activeElement?.tagName === 'INPUT' && document.activeElement?.type === 'text') {
+      if (oskEnabled) {
+        e.preventDefault();
+        const input = document.activeElement;
+        const result = await showOnScreenKeyboard(input);
+        input.value = result;
+        input.focus();
+      }
       return;
     }
 
@@ -1587,6 +1657,304 @@ function showConfirmDialog(message) {
 
     // Focus cancel button after DOM renders
     setTimeout(() => cancelBtn.focus(), 0);
+  });
+}
+
+// ========== ON-SCREEN KEYBOARD ==========
+function showOnScreenKeyboard(inputElement) {
+  return new Promise((resolve) => {
+    let currentValue = inputElement.value;
+    let shifted = false;
+    let showingConfig = false;
+
+    // Keyboard layouts
+    const qwertyRows = [
+      ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
+      ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
+      ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l'],
+      ['z', 'x', 'c', 'v', 'b', 'n', 'm']
+    ];
+
+    const qwertySymbolRows = [
+      ['!', '@', '#', '$', '%', '^', '&', '*', '(', ')'],
+      ['`', '~', '-', '_', '=', '+', '[', ']', '{', '}'],
+      ['\\', '|', ';', ':', "'", '"', ',', '.', '/'],
+      ['<', '>', '?']
+    ];
+
+    const alphaRows = [
+      ['a', 'b', 'c', 'd', 'e', 'f', 'g'],
+      ['h', 'i', 'j', 'k', 'l', 'm', 'n'],
+      ['o', 'p', 'q', 'r', 's', 't', 'u'],
+      ['v', 'w', 'x', 'y', 'z'],
+      ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0']
+    ];
+
+    function getRows() {
+      if (oskLayout === 'qwerty') {
+        return oskFullKeyboard ? [...qwertyRows, ...qwertySymbolRows] : qwertyRows;
+      } else {
+        return alphaRows;
+      }
+    }
+
+    function renderKeyboard() {
+      const rows = getRows();
+      const specialRow = [
+        { key: '⇧', action: 'shift', label: 'Shift' },
+        { key: '␣', action: 'space', label: 'Space' },
+        { key: '⌫', action: 'backspace', label: 'Backspace' },
+        { key: '⚙', action: 'config', label: 'Settings' },
+        { key: '✗', action: 'cancel', label: 'Cancel', class: 'osk-cancel' },
+        { key: '✓', action: 'done', label: 'Done' }
+      ];
+
+      return `
+        <div class="osk-overlay">
+          <div class="osk-container">
+            <div class="osk-input-preview">${escapeHtml(currentValue) || '<span class="osk-placeholder">Type here...</span>'}</div>
+            <div class="osk-keyboard">
+              ${rows.map((row, rowIdx) => `
+                <div class="osk-row">
+                  ${row.map((key, keyIdx) => `
+                    <button class="osk-key" data-key="${escapeHtml(key)}" data-row="${rowIdx}" data-col="${keyIdx}">
+                      ${shifted ? key.toUpperCase() : key}
+                    </button>
+                  `).join('')}
+                </div>
+              `).join('')}
+              <div class="osk-row osk-special-row">
+                ${specialRow.map((item, idx) => `
+                  <button class="osk-key osk-special ${item.action === 'done' ? 'osk-done' : ''} ${item.action === 'cancel' ? 'osk-cancel' : ''} ${item.action === 'shift' && shifted ? 'osk-active' : ''}"
+                          data-action="${item.action}" data-row="${rows.length}" data-col="${idx}"
+                          title="${item.label}">
+                    ${item.key}
+                  </button>
+                `).join('')}
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderConfig() {
+      return `
+        <div class="osk-overlay">
+          <div class="osk-container osk-config">
+            <div class="osk-config-title">Keyboard Settings</div>
+            <div class="osk-config-section">
+              <div class="osk-config-label">Layout</div>
+              <div class="osk-config-option" tabindex="0" data-config="layout-qwerty">
+                <span class="osk-config-radio ${oskLayout === 'qwerty' ? 'checked' : ''}"></span>
+                <span>QWERTY</span>
+              </div>
+              <div class="osk-config-option" tabindex="0" data-config="layout-alpha">
+                <span class="osk-config-radio ${oskLayout === 'alpha' ? 'checked' : ''}"></span>
+                <span>Alphabetical</span>
+              </div>
+            </div>
+            <div class="osk-config-section">
+              <div class="osk-config-option" tabindex="0" data-config="full-keyboard">
+                <span class="osk-config-checkbox ${oskFullKeyboard ? 'checked' : ''}"></span>
+                <span>Full keyboard (include all symbols)</span>
+              </div>
+            </div>
+            <div class="osk-config-buttons">
+              <button class="osk-config-btn" id="oskConfigBack" tabindex="0">Back</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = renderKeyboard();
+    const oskOverlay = wrapper.firstElementChild;
+    document.body.appendChild(oskOverlay);
+    oskIsOpen = true;
+
+    let focusRow = 0;
+    let focusCol = 0;
+
+    function getKeyAt(row, col) {
+      const rows = document.querySelectorAll('.osk-keyboard .osk-row');
+      if (row < 0 || row >= rows.length) return null;
+      const keys = rows[row].querySelectorAll('.osk-key');
+      if (col < 0 || col >= keys.length) return null;
+      return keys[col];
+    }
+
+    function focusKey(row, col) {
+      const rows = document.querySelectorAll('.osk-keyboard .osk-row');
+      if (row < 0) row = rows.length - 1;
+      if (row >= rows.length) row = 0;
+
+      const keys = rows[row].querySelectorAll('.osk-key');
+      if (col < 0) col = keys.length - 1;
+      if (col >= keys.length) col = keys.length - 1;
+
+      focusRow = row;
+      focusCol = col;
+      keys[col]?.focus();
+    }
+
+    function updateDisplay() {
+      const preview = document.querySelector('.osk-input-preview');
+      if (preview) {
+        preview.innerHTML = escapeHtml(currentValue) || '<span class="osk-placeholder">Type here...</span>';
+      }
+      // Update shift state on keys
+      document.querySelectorAll('.osk-key[data-key]').forEach(key => {
+        const char = key.dataset.key;
+        if (char && char.length === 1) {
+          key.textContent = shifted ? char.toUpperCase() : char;
+        }
+      });
+      // Update shift button state
+      const shiftBtn = document.querySelector('[data-action="shift"]');
+      if (shiftBtn) {
+        shiftBtn.classList.toggle('osk-active', shifted);
+      }
+    }
+
+    function handleKeyPress(key, action) {
+      if (action === 'shift') {
+        shifted = !shifted;
+        updateDisplay();
+      } else if (action === 'space') {
+        currentValue += ' ';
+        updateDisplay();
+      } else if (action === 'backspace') {
+        currentValue = currentValue.slice(0, -1);
+        updateDisplay();
+      } else if (action === 'config') {
+        showingConfig = true;
+        const container = document.querySelector('.osk-overlay');
+        container.outerHTML = renderConfig();
+        setupConfigEvents();
+      } else if (action === 'cancel') {
+        cleanup(inputElement.value); // Return original value
+      } else if (action === 'done') {
+        cleanup(currentValue);
+      } else if (key) {
+        currentValue += shifted ? key.toUpperCase() : key;
+        updateDisplay();
+      }
+    }
+
+    let configFocusIdx = 0;
+
+    function getConfigFocusables() {
+      return Array.from(document.querySelectorAll('.osk-config-option, .osk-config-btn'));
+    }
+
+    function focusConfigItem(idx) {
+      const items = getConfigFocusables();
+      if (idx < 0) idx = items.length - 1;
+      if (idx >= items.length) idx = 0;
+      configFocusIdx = idx;
+      items[idx]?.focus();
+    }
+
+    function toggleConfigOption(element) {
+      const config = element.dataset.config;
+      if (config === 'layout-qwerty') {
+        oskLayout = 'qwerty';
+        localStorage.setItem('oskLayout', oskLayout);
+      } else if (config === 'layout-alpha') {
+        oskLayout = 'alpha';
+        localStorage.setItem('oskLayout', oskLayout);
+      } else if (config === 'full-keyboard') {
+        oskFullKeyboard = !oskFullKeyboard;
+        localStorage.setItem('oskFullKeyboard', oskFullKeyboard);
+      }
+      // Update visual state
+      document.querySelectorAll('.osk-config-radio').forEach(r => r.classList.remove('checked'));
+      document.querySelector(`[data-config="layout-${oskLayout}"] .osk-config-radio`)?.classList.add('checked');
+      document.querySelector('[data-config="full-keyboard"] .osk-config-checkbox')?.classList.toggle('checked', oskFullKeyboard);
+    }
+
+    function closeConfig() {
+      showingConfig = false;
+      const container = document.querySelector('.osk-overlay');
+      container.outerHTML = renderKeyboard();
+      setupKeyboardEvents();
+      focusKey(0, 0);
+    }
+
+    function setupConfigEvents() {
+      document.querySelectorAll('.osk-config-option').forEach(option => {
+        option.addEventListener('click', () => toggleConfigOption(option));
+      });
+
+      document.getElementById('oskConfigBack')?.addEventListener('click', closeConfig);
+
+      // Focus first item
+      focusConfigItem(0);
+    }
+
+    function setupKeyboardEvents() {
+      document.querySelectorAll('.osk-key').forEach(key => {
+        key.addEventListener('click', () => {
+          const keyChar = key.dataset.key;
+          const action = key.dataset.action;
+          handleKeyPress(keyChar, action);
+        });
+      });
+    }
+
+    function cleanup(result) {
+      oskIsOpen = false;
+      document.removeEventListener('keydown', handleOskKey, true);
+      const container = document.querySelector('.osk-overlay');
+      if (container) container.remove();
+      resolve(result);
+    }
+
+    function handleOskKey(e) {
+      e.stopPropagation();
+      e.preventDefault();
+
+      if (showingConfig) {
+        if (e.key === 'Escape') {
+          closeConfig();
+        } else if (e.key === 'Enter') {
+          const focused = document.activeElement;
+          if (focused?.classList.contains('osk-config-option')) {
+            toggleConfigOption(focused);
+          } else if (focused?.id === 'oskConfigBack') {
+            closeConfig();
+          }
+        } else if (e.key === 'ArrowUp') {
+          focusConfigItem(configFocusIdx - 1);
+        } else if (e.key === 'ArrowDown') {
+          focusConfigItem(configFocusIdx + 1);
+        }
+        return;
+      }
+
+      if (e.key === 'Escape') {
+        cleanup(inputElement.value); // Cancel, return original value
+      } else if (e.key === 'Enter') {
+        const focused = document.activeElement;
+        if (focused?.classList.contains('osk-key')) {
+          focused.click();
+        }
+      } else if (e.key === 'ArrowUp') {
+        focusKey(focusRow - 1, focusCol);
+      } else if (e.key === 'ArrowDown') {
+        focusKey(focusRow + 1, focusCol);
+      } else if (e.key === 'ArrowLeft') {
+        focusKey(focusRow, focusCol - 1);
+      } else if (e.key === 'ArrowRight') {
+        focusKey(focusRow, focusCol + 1);
+      }
+    }
+
+    document.addEventListener('keydown', handleOskKey, true);
+    setupKeyboardEvents();
+    focusKey(0, 0);
   });
 }
 

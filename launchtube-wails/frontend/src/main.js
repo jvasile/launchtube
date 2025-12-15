@@ -734,6 +734,9 @@ function handleMenuKeydown(e) {
   const menu = document.getElementById('popupMenu');
   if (!menu?.classList.contains('open')) return;
 
+  // Stop all key events from propagating while menu is open
+  e.stopPropagation();
+
   const items = Array.from(menu.querySelectorAll('.popup-item'));
   let idx = items.findIndex(item => item === document.activeElement);
 

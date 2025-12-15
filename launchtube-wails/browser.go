@@ -121,6 +121,13 @@ func (bm *BrowserManager) Launch(browserName, url, profileID string, serverPort 
 			Log("Loading uBlock Origin from: %s", ublockExt)
 		}
 
+		// Dark Reader
+		darkReaderExt := filepath.Join(bm.assetDir, "extensions", "dark-reader")
+		if _, err := os.Stat(darkReaderExt); err == nil {
+			extensions = append(extensions, darkReaderExt)
+			Log("Loading Dark Reader from: %s", darkReaderExt)
+		}
+
 		if len(extensions) > 0 {
 			args = append(args, "--load-extension="+strings.Join(extensions, ","))
 		}

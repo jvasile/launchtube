@@ -1,10 +1,11 @@
 {
   "manifest_version": 3,
   "name": "LaunchTube Loader",
-  "version": "1.9",
+  "version": "2.2",
   "description": "Connects streaming sites to LaunchTube",
   "permissions": [
     "scripting",
+    "storage",
     "tabs"
   ],
   "host_permissions": [

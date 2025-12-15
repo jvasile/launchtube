@@ -1595,14 +1595,29 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-document.addEventListener('mousemove', () => {
+document.addEventListener('mousemove', (e) => {
   if (keyboardMode) {
     keyboardMode = false;
     document.body.classList.remove('keyboard-mode');
+
+    // Check if mouse is over a navigable element
+    const target = document.elementFromPoint(e.clientX, e.clientY);
+    const isNavigable = target && (target.classList.contains('app-tile') ||
+        target.classList.contains('library-tile') ||
+        target.classList.contains('profile-tile') ||
+        target.classList.contains('menu-item') ||
+        target.classList.contains('menu-btn') ||
+        target.classList.contains('back-btn'));
+
+    // Only change focus if mouse is over a navigable element
+    if (isNavigable) {
+      target.focus();
+    }
+    // If not over anything navigable, keep current focus
   }
 });
 
-// When mouse enters a navigable element, focus it to prevent dual highlights
+// When mouse enters a navigable element, focus it
 document.addEventListener('mouseenter', (e) => {
   const target = e.target;
   if (target.classList.contains('app-tile') ||

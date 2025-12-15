@@ -27,25 +27,24 @@ func (fm *FlutterManager) detectFlutterBin() {
 	// Look for Flutter binary in common locations
 	candidates := []string{}
 
-	// Check relative to this executable
 	exe, _ := os.Executable()
 	exeDir := filepath.Dir(exe)
-
-	// Development: ../build/linux/x64/release/bundle/launchtube
-	candidates = append(candidates, filepath.Join(exeDir, "..", "build", "linux", "x64", "release", "bundle", "launchtube"))
-
-	// Installed alongside server
-	candidates = append(candidates, filepath.Join(exeDir, "launchtube-ui"))
-	candidates = append(candidates, filepath.Join(exeDir, "launchtube-flutter"))
-
-	// Development: check if we're in the server directory
 	cwd, _ := os.Getwd()
-	candidates = append(candidates, filepath.Join(cwd, "..", "build", "linux", "x64", "release", "bundle", "launchtube"))
-	candidates = append(candidates, filepath.Join(cwd, "build", "linux", "x64", "release", "bundle", "launchtube"))
 
 	if runtime.GOOS == "windows" {
+		// Windows paths
 		candidates = append(candidates, filepath.Join(exeDir, "launchtube-ui.exe"))
+		candidates = append(candidates, filepath.Join(exeDir, "launchtube.exe"))
+		candidates = append(candidates, filepath.Join(exeDir, "..", "build", "windows", "x64", "runner", "Release", "launchtube.exe"))
 		candidates = append(candidates, filepath.Join(cwd, "..", "build", "windows", "x64", "runner", "Release", "launchtube.exe"))
+		candidates = append(candidates, filepath.Join(cwd, "build", "windows", "x64", "runner", "Release", "launchtube.exe"))
+	} else {
+		// Linux paths
+		candidates = append(candidates, filepath.Join(exeDir, "launchtube-ui"))
+		candidates = append(candidates, filepath.Join(exeDir, "launchtube-flutter"))
+		candidates = append(candidates, filepath.Join(exeDir, "..", "build", "linux", "x64", "release", "bundle", "launchtube"))
+		candidates = append(candidates, filepath.Join(cwd, "..", "build", "linux", "x64", "release", "bundle", "launchtube"))
+		candidates = append(candidates, filepath.Join(cwd, "build", "linux", "x64", "release", "bundle", "launchtube"))
 	}
 
 	for _, path := range candidates {

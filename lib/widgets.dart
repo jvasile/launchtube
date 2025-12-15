@@ -718,20 +718,24 @@ class _LauncherHomeState extends State<LauncherHome> with WidgetsBindingObserver
   Future<void> _loadApps() async {
     try {
       final path = await _configPath;
+      Log.write('Loading apps from: $path (profile=${_currentProfile?.id})');
       final file = File(path);
       if (await file.exists()) {
         final contents = await file.readAsString();
         final List<dynamic> jsonList = json.decode(contents);
+        Log.write('Loaded ${jsonList.length} apps from file');
         setState(() {
           apps = jsonList.map((j) => AppConfig.fromJson(j)).toList();
         });
       } else {
+        Log.write('Apps file not found, using defaults');
         setState(() {
           apps = defaultApps;
         });
         await _saveApps();
       }
     } catch (e) {
+      Log.write('Error loading apps: $e');
       setState(() {
         apps = defaultApps;
       });
@@ -1011,6 +1015,22 @@ class _LauncherHomeState extends State<LauncherHome> with WidgetsBindingObserver
   }
 
   Future<void> _quitApp() async {
+    // If running under Go server, call shutdown endpoint (it will kill Flutter)
+    if (_goServerPort != null) {
+      final client = HttpClient();
+      try {
+        final request = await client.postUrl(
+          Uri.parse('http://localhost:$_goServerPort/api/1/shutdown'),
+        );
+        await request.close();
+        // Server will kill us, but exit anyway in case it doesn't
+        await Future.delayed(const Duration(milliseconds: 500));
+      } catch (e) {
+        Log.write('Failed to call shutdown: $e');
+      } finally {
+        client.close();
+      }
+    }
     await ExternalPlayer.getInstance().stop();
     await _closeBrowser();
     exit(0);

@@ -84,6 +84,9 @@ class BrowserInfo {
     BrowserInfo(name: 'Chromium', executable: 'chromium', fullscreenFlag: '--start-fullscreen'),
     BrowserInfo(name: 'Chromium', executable: 'chromium-browser', fullscreenFlag: '--start-fullscreen'),
     BrowserInfo(name: 'Chromium', executable: 'chromium.exe', fullscreenFlag: '--start-fullscreen'),
+    BrowserInfo(name: 'Brave', executable: 'brave', fullscreenFlag: '--start-fullscreen'),
+    BrowserInfo(name: 'Brave', executable: 'brave-browser', fullscreenFlag: '--start-fullscreen'),
+    BrowserInfo(name: 'Brave', executable: 'brave.exe', fullscreenFlag: '--start-fullscreen'),
   ];
 
   static Future<List<BrowserInfo>> detectBrowsers() async {

@@ -14,8 +14,8 @@ class Log {
   static Future<void> init() async {
     final dir = await getApplicationSupportDirectory();
     _logFile = File('${dir.path}/launchtube.log');
-    // Truncate on startup
-    _raf = await _logFile!.open(mode: FileMode.write);
+    // Append to preserve Go server logs
+    _raf = await _logFile!.open(mode: FileMode.append);
     final header = '=== LaunchTube started at ${DateTime.now()} ===\n';
     await _raf!.writeString(header);
     await _raf!.flush();

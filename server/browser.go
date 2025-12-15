@@ -26,6 +26,9 @@ var knownBrowsers = []BrowserInfo{
 	{Name: "Chromium", Executable: "chromium", FullscreenFlag: "--start-fullscreen"},
 	{Name: "Chromium", Executable: "chromium-browser", FullscreenFlag: "--start-fullscreen"},
 	{Name: "Chromium", Executable: "chromium.exe", FullscreenFlag: "--start-fullscreen"},
+	{Name: "Brave", Executable: "brave", FullscreenFlag: "--start-fullscreen"},
+	{Name: "Brave", Executable: "brave-browser", FullscreenFlag: "--start-fullscreen"},
+	{Name: "Brave", Executable: "brave.exe", FullscreenFlag: "--start-fullscreen"},
 }
 
 type BrowserManager struct {

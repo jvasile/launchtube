@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +19,9 @@ var (
 	version   = "dev"
 	commit    = "unknown"
 	buildDate = "unknown"
+
+	// On Windows, don't kill/respawn Flutter - no freeze bug there
+	manageFlutterLifecycle = runtime.GOOS != "windows"
 )
 
 type Server struct {
@@ -59,18 +63,18 @@ func NewServer() *Server {
 		flutterMgr: NewFlutterManager(),
 	}
 
-	// Set up lifecycle callbacks
-	s.browserMgr.SetOnExit(func() {
-		// Browser exited, respawn Flutter UI with active profile
-		Log("Browser exited, respawning Flutter UI (profile=%s)", s.activeProfile)
-		s.flutterMgr.LaunchWithPortAndProfile(s.port, s.activeProfile)
-	})
+	// Set up lifecycle callbacks (Linux only - respawn Flutter after app exits)
+	if manageFlutterLifecycle {
+		s.browserMgr.SetOnExit(func() {
+			Log("Browser exited, respawning Flutter UI (profile=%s)", s.activeProfile)
+			s.flutterMgr.LaunchWithPortAndProfile(s.port, s.activeProfile)
+		})
 
-	s.player.SetOnExit(func() {
-		// Player exited, respawn Flutter UI with active profile
-		Log("Player exited, respawning Flutter UI (profile=%s)", s.activeProfile)
-		s.flutterMgr.LaunchWithPortAndProfile(s.port, s.activeProfile)
-	})
+		s.player.SetOnExit(func() {
+			Log("Player exited, respawning Flutter UI (profile=%s)", s.activeProfile)
+			s.flutterMgr.LaunchWithPortAndProfile(s.port, s.activeProfile)
+		})
+	}
 
 	return s
 }
@@ -153,6 +157,9 @@ func (s *Server) Start() error {
 		s.port = port
 		log.Printf("LaunchTube server running on port %d", port)
 
+		// Start wake detector (Linux only)
+		s.startWakeDetector()
+
 		// Launch Flutter UI now that we know the port
 		if err := s.flutterMgr.LaunchWithPort(s.port); err != nil {
 			Log("Warning: Failed to launch Flutter UI: %v", err)
@@ -161,6 +168,33 @@ func (s *Server) Start() error {
 		return http.Serve(ln, s.corsMiddleware(mux))
 	}
 	return fmt.Errorf("failed to start server - all ports in use")
+}
+
+func (s *Server) startWakeDetector() {
+	if !manageFlutterLifecycle {
+		return
+	}
+
+	Log("Starting wake detector (poll every 5s, threshold 7s)")
+	ticker := time.NewTicker(5 * time.Second)
+	lastCheck := time.Now()
+
+	go func() {
+		for range ticker.C {
+			now := time.Now()
+			elapsed := now.Sub(lastCheck)
+
+			// If more than 7 seconds passed but ticker is 5s, system likely woke from sleep
+			if elapsed > 7*time.Second && s.flutterMgr.IsRunning() {
+				Log("Wake detected (gap: %v), respawning Flutter UI", elapsed)
+				s.flutterMgr.Kill()
+				time.Sleep(500 * time.Millisecond)
+				s.flutterMgr.LaunchWithPortAndProfile(s.port, s.activeProfile)
+			}
+
+			lastCheck = now
+		}
+	}()
 }
 
 func (s *Server) corsMiddleware(next http.Handler) http.Handler {
@@ -646,11 +680,13 @@ func (s *Server) handleBrowserLaunch(w http.ResponseWriter, r *http.Request) {
 
 	Log("API: /api/1/browser/launch called - browser=%s url=%s profile=%s", req.Browser, req.URL, req.ProfileID)
 
-	// Kill Flutter UI before launching browser
-	s.flutterMgr.Kill()
-
 	// Store active profile
 	s.activeProfile = req.ProfileID
+
+	// Kill Flutter UI before launching browser (Linux only)
+	if manageFlutterLifecycle {
+		s.flutterMgr.Kill()
+	}
 
 	// Launch browser
 	if err := s.browserMgr.Launch(req.Browser, req.URL, req.ProfileID, s.port); err != nil {
@@ -716,8 +752,10 @@ func (s *Server) handleAppLaunch(w http.ResponseWriter, r *http.Request) {
 	// Store active profile
 	s.activeProfile = req.ProfileID
 
-	// Kill Flutter UI before launching app
-	s.flutterMgr.Kill()
+	// Kill Flutter UI before launching app (Linux only)
+	if manageFlutterLifecycle {
+		s.flutterMgr.Kill()
+	}
 
 	// Parse command line
 	parts := strings.Fields(req.CommandLine)
@@ -731,19 +769,23 @@ func (s *Server) handleAppLaunch(w http.ResponseWriter, r *http.Request) {
 	if err := cmd.Start(); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
-		// Respawn Flutter on error
-		s.flutterMgr.LaunchWithPortAndProfile(s.port, s.activeProfile)
+		// Respawn Flutter on error (Linux only)
+		if manageFlutterLifecycle {
+			s.flutterMgr.LaunchWithPortAndProfile(s.port, s.activeProfile)
+		}
 		return
 	}
 
 	Log("Native app started with PID: %d", cmd.Process.Pid)
 
-	// Wait for app to exit and respawn Flutter
-	go func() {
-		cmd.Wait()
-		Log("Native app exited, respawning Flutter UI (profile=%s)", s.activeProfile)
-		s.flutterMgr.LaunchWithPortAndProfile(s.port, s.activeProfile)
-	}()
+	// Wait for app to exit and respawn Flutter (Linux only)
+	if manageFlutterLifecycle {
+		go func() {
+			cmd.Wait()
+			Log("Native app exited, respawning Flutter UI (profile=%s)", s.activeProfile)
+			s.flutterMgr.LaunchWithPortAndProfile(s.port, s.activeProfile)
+		}()
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprintf(w, `{"status":"ok","pid":%d}`, cmd.Process.Pid)

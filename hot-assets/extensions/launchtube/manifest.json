@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "LaunchTube Loader",
-  "version": "1.0",
+  "version": "1.8",
   "description": "Connects streaming sites to LaunchTube",
   "permissions": [
     "scripting",
@@ -12,6 +12,9 @@
     "http://127.0.0.1/*",
     "<all_urls>"
   ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],

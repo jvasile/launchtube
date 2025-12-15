@@ -98,6 +98,9 @@ func (bm *BrowserManager) Launch(browserName, url, profileID string, serverPort 
 	if profileID != "" && browser.Name != "Firefox" {
 		profilePath := filepath.Join(bm.dataDir, "profiles", profileID, "chrome")
 		args = append(args, "--user-data-dir="+profilePath)
+
+		// Clear service worker cache if our extension has been updated
+		bm.clearStaleServiceWorkerCache(profileID)
 	}
 
 	// Load extensions for Chrome/Chromium
@@ -221,6 +224,36 @@ func (bm *BrowserManager) GetPID() int {
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
 	return bm.pid
+}
+
+func (bm *BrowserManager) clearStaleServiceWorkerCache(profileID string) {
+	bgScript := filepath.Join(bm.assetDir, "extensions", "launchtube", "background.js")
+	mtimeFile := filepath.Join(bm.dataDir, "profiles", profileID, "sw_mtime")
+	swDir := filepath.Join(bm.dataDir, "profiles", profileID, "chrome", "Default", "Service Worker")
+
+	// Get background.js mtime
+	bgInfo, err := os.Stat(bgScript)
+	if err != nil {
+		return
+	}
+	bgMtime := bgInfo.ModTime().Unix()
+
+	// Read stored mtime
+	storedMtime := int64(0)
+	if data, err := os.ReadFile(mtimeFile); err == nil {
+		fmt.Sscanf(string(data), "%d", &storedMtime)
+	}
+
+	// If background.js is newer, clear entire service worker directory
+	if bgMtime > storedMtime {
+		Log("Extension updated, clearing service worker cache")
+		if err := os.RemoveAll(swDir); err == nil {
+			Log("Removed service worker directory")
+		}
+
+		// Update stored mtime
+		os.WriteFile(mtimeFile, []byte(fmt.Sprintf("%d", bgMtime)), 0644)
+	}
 }
 
 type BrowserError struct {

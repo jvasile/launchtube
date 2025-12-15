@@ -74,11 +74,14 @@
     // Load and execute script
     async function loadScript(port) {
         try {
+            serverLog(`Fetching script for ${location.href}`);
             const response = await fetch(
                 `http://localhost:${port}/api/1/match?url=${encodeURIComponent(location.href)}`
             );
+            serverLog(`Fetch response: status=${response.status} ok=${response.ok}`);
             if (response.ok) {
                 const code = await response.text();
+                serverLog(`Response body length: ${code.length}`);
                 if (code) {
                     serverLog(`Got script (${code.length} chars), executing...`);
                     window.LAUNCH_TUBE_PORT = port;

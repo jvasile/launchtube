@@ -69,6 +69,12 @@ class _LauncherHomeState extends State<LauncherHome> with WidgetsBindingObserver
   Process? _browserProcess;
   BrowserInfo? _launchedBrowser;
 
+  // Key to force widget rebuild on resume (fixes Linux freeze after sleep/wake)
+  int _rebuildKey = 0;
+
+  // Go server port from environment variable (set when spawned by Go server)
+  final int? _goServerPort = int.tryParse(Platform.environment['LAUNCHTUBE_SERVER_PORT'] ?? '');
+
   @override
   void initState() {
     super.initState();
@@ -110,6 +116,22 @@ class _LauncherHomeState extends State<LauncherHome> with WidgetsBindingObserver
   Future<void> _initializeProfiles() async {
     // Load profiles
     final profiles = await ProfileManager.loadProfiles();
+
+    // Check if Go server passed an active profile (respawn after browser/player exit)
+    final envProfileId = Platform.environment['LAUNCHTUBE_ACTIVE_PROFILE'];
+    if (envProfileId != null && envProfileId.isNotEmpty && profiles.isNotEmpty) {
+      final envProfile = profiles.where((p) => p.id == envProfileId).firstOrNull;
+      if (envProfile != null) {
+        Log.write('Using profile from environment: ${envProfile.displayName}');
+        setState(() {
+          _profiles = profiles;
+          _currentProfile = envProfile;
+          _showingUserSelection = false;
+        });
+        await _loadApps();
+        return;
+      }
+    }
 
     if (profiles.isEmpty) {
       // First run - show user creation dialog
@@ -665,7 +687,21 @@ class _LauncherHomeState extends State<LauncherHome> with WidgetsBindingObserver
   void didChangeAppLifecycleState(AppLifecycleState state) {
     Log.write('Lifecycle: $state');
     if (state == AppLifecycleState.resumed) {
-      // App received focus - close any launched browser
+      Log.write('Resume: incrementing rebuildKey from $_rebuildKey');
+      // Force widget rebuild to fix Linux freeze after sleep/wake
+      setState(() {
+        _rebuildKey++;
+      });
+      Log.write('Resume: setState called, rebuildKey now $_rebuildKey');
+      // Force Flutter to schedule a new frame
+      WidgetsBinding.instance.scheduleFrame();
+      Log.write('Resume: scheduleFrame called');
+      // Re-request focus after rebuild
+      Future.delayed(const Duration(milliseconds: 100), () {
+        Log.write('Resume: requesting focus');
+        _focusNode.requestFocus();
+      });
+      // Close any launched browser
       _closeBrowser();
     }
   }
@@ -805,28 +841,35 @@ class _LauncherHomeState extends State<LauncherHome> with WidgetsBindingObserver
           }
         }
 
-        // Build args - always fullscreen
+        // If spawned by Go server, use its API to launch browser
+        // The Go server will kill Flutter and respawn it when browser exits
+        if (_goServerPort != null) {
+          Log.write('Launching browser via Go server on port $_goServerPort');
+          await _launchBrowserViaGoServer(
+            browser: selectedBrowser.executable,
+            url: app.url!,
+            profileId: _currentProfile?.id,
+          );
+          return;
+        }
+
+        // Fallback: direct browser launch (for development without Go server)
         final args = <String>[];
         args.add(selectedBrowser.fullscreenFlag);
 
-        // Add user-data-dir for Chrome/Chromium profile isolation
         if (_currentProfile != null && selectedBrowser.name != 'Firefox') {
           final profilePath = ProfileManager.getBrowserProfilePath(_currentProfile!);
           args.add('--user-data-dir=$profilePath');
         }
 
-        // Add LaunchTube extension for script injection (Chrome/Chromium only)
         if (selectedBrowser.name != 'Firefox') {
           final extensionPath = '${getAssetDirectory()}/extensions/launchtube';
           args.add('--load-extension=$extensionPath');
         }
 
-        // Add remote debugging port for server-side extension detection
         const debugPort = 9222;
         args.add('--remote-debugging-port=$debugPort');
 
-        // For Chrome/Chromium with our extension, go directly to target URL
-        // For Firefox (no extension), use setup page
         if (selectedBrowser.name == 'Firefox') {
           final setupUrl = 'http://localhost:${_server.port}/setup?target=${Uri.encodeComponent(app.url!)}';
           args.add(setupUrl);
@@ -834,15 +877,13 @@ class _LauncherHomeState extends State<LauncherHome> with WidgetsBindingObserver
           args.add(app.url!);
         }
 
-        Log.write('Launching browser: ${selectedBrowser.executable} ${args.join(' ')}');
+        Log.write('Launching browser directly: ${selectedBrowser.executable} ${args.join(' ')}');
         _launchedBrowser = selectedBrowser;
         _browserProcess = await Process.start(selectedBrowser.executable, args);
         Log.write('Browser started with PID: ${_browserProcess!.pid}');
 
-        // Tell screensaver inhibitor about the browser
         ScreensaverInhibitor.getInstance().setBrowser(selectedBrowser.name, debugPort);
 
-        // Clear reference if process exits on its own
         _browserProcess!.exitCode.then((_) {
           Log.write('Browser process exited');
           _browserProcess = null;
@@ -850,9 +891,21 @@ class _LauncherHomeState extends State<LauncherHome> with WidgetsBindingObserver
           ScreensaverInhibitor.getInstance().setBrowser(null, null);
         });
       } else {
+        // Native app launch
+        if (_goServerPort != null) {
+          Log.write('Launching native app via Go server on port $_goServerPort');
+          await _launchAppViaGoServer(
+            commandLine: app.commandLine!,
+            profileId: _currentProfile?.id,
+          );
+          return;
+        }
+
+        // Fallback: direct launch (for development without Go server)
         final parts = app.commandLine!.split(' ').where((s) => s.isNotEmpty).toList();
         final command = parts.first;
         final args = parts.skip(1).toList();
+        Log.write('Launching native app directly: ${app.commandLine}');
         await Process.start(command, args, mode: ProcessStartMode.detached);
       }
     } catch (e) {
@@ -864,6 +917,60 @@ class _LauncherHomeState extends State<LauncherHome> with WidgetsBindingObserver
           ),
         );
       }
+    }
+  }
+
+  Future<void> _launchBrowserViaGoServer({
+    required String browser,
+    required String url,
+    String? profileId,
+  }) async {
+    final client = HttpClient();
+    try {
+      final request = await client.postUrl(
+        Uri.parse('http://localhost:$_goServerPort/api/1/browser/launch'),
+      );
+      request.headers.set('Content-Type', 'application/json');
+      request.write(jsonEncode({
+        'browser': browser,
+        'url': url,
+        if (profileId != null) 'profileId': profileId,
+      }));
+      final response = await request.close();
+      final body = await response.transform(utf8.decoder).join();
+      Log.write('Go server browser launch response: $body');
+      // Note: Go server will kill this Flutter process, so we won't get here normally
+    } catch (e) {
+      Log.write('Failed to launch browser via Go server: $e');
+      rethrow;
+    } finally {
+      client.close();
+    }
+  }
+
+  Future<void> _launchAppViaGoServer({
+    required String commandLine,
+    String? profileId,
+  }) async {
+    final client = HttpClient();
+    try {
+      final request = await client.postUrl(
+        Uri.parse('http://localhost:$_goServerPort/api/1/app/launch'),
+      );
+      request.headers.set('Content-Type', 'application/json');
+      request.write(jsonEncode({
+        'commandLine': commandLine,
+        if (profileId != null) 'profileId': profileId,
+      }));
+      final response = await request.close();
+      final body = await response.transform(utf8.decoder).join();
+      Log.write('Go server app launch response: $body');
+      // Note: Go server will kill this Flutter process, so we won't get here normally
+    } catch (e) {
+      Log.write('Failed to launch app via Go server: $e');
+      rethrow;
+    } finally {
+      client.close();
     }
   }
 
@@ -1388,11 +1495,14 @@ class _LauncherHomeState extends State<LauncherHome> with WidgetsBindingObserver
 
   @override
   Widget build(BuildContext context) {
-    return KeyboardListener(
-      focusNode: _focusNode,
-      autofocus: true,
-      onKeyEvent: _handleKeyEvent,
-      child: Scaffold(
+    Log.write('Build: rebuildKey=$_rebuildKey');
+    return KeyedSubtree(
+      key: ValueKey(_rebuildKey),
+      child: KeyboardListener(
+        focusNode: _focusNode,
+        autofocus: true,
+        onKeyEvent: _handleKeyEvent,
+        child: Scaffold(
         body: SafeArea(
           child: _showingUserSelection
               ? _buildUserSelectionScreen()
@@ -1632,6 +1742,7 @@ class _LauncherHomeState extends State<LauncherHome> with WidgetsBindingObserver
             ],
           ),
         ),
+      ),
       ),
     );
   }

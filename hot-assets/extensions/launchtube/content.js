@@ -2,9 +2,10 @@
 (function() {
     'use strict';
 
-    const VERSION = '2.0';
+    const VERSION = '2.1';
     const PORTS = [8765, 8766, 8767, 8768, 8769];
     let detectedPort = null;
+    let activeProfileId = null;
 
     // Bridge for fetch requests (bypasses CSP via background service worker)
     const pendingRequests = new Map();
@@ -83,12 +84,30 @@
         }
     }
 
+    // Get active profile from server
+    async function fetchActiveProfile(port) {
+        try {
+            const response = await bridgedFetch(`http://localhost:${port}/api/1/profile`);
+            if (response.ok) {
+                const data = JSON.parse(response.text);
+                if (data.profileId) {
+                    activeProfileId = data.profileId;
+                    serverLog(`Active profile: ${activeProfileId}`);
+                }
+            }
+        } catch (e) {
+            serverLog(`Failed to fetch profile: ${e.message}`, 'warn');
+        }
+    }
+
     // Load and execute script
     async function loadScript(port) {
         try {
-            const response = await bridgedFetch(
-                `http://localhost:${port}/api/1/match?url=${encodeURIComponent(location.href)}`
-            );
+            let url = `http://localhost:${port}/api/1/match?url=${encodeURIComponent(location.href)}`;
+            if (activeProfileId) {
+                url += `&profile=${encodeURIComponent(activeProfileId)}`;
+            }
+            const response = await bridgedFetch(url);
             if (response.ok && response.text) {
                 const code = response.text;
                 serverLog(`Got script (${code.length} chars), executing...`);
@@ -131,6 +150,9 @@
         }
         detectedPort = port;
         serverLog('Found server on port ' + port);
+
+        // Fetch active profile before loading script
+        await fetchActiveProfile(port);
 
         setupHelpers(port);
 

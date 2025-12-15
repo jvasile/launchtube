@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -98,12 +99,26 @@ func (bm *BrowserManager) Launch(browserName, url, profileID string, serverPort 
 		args = append(args, "--user-data-dir="+profilePath)
 	}
 
-	// Load LaunchTube extension for Chrome/Chromium
+	// Load extensions for Chrome/Chromium
 	if browser.Name != "Firefox" {
-		extensionPath := filepath.Join(bm.assetDir, "extensions", "launchtube")
-		if _, err := os.Stat(extensionPath); err == nil {
-			args = append(args, "--load-extension="+extensionPath)
-			Log("Loading extension from: %s", extensionPath)
+		var extensions []string
+
+		// LaunchTube loader extension
+		launchtubeExt := filepath.Join(bm.assetDir, "extensions", "launchtube")
+		if _, err := os.Stat(launchtubeExt); err == nil {
+			extensions = append(extensions, launchtubeExt)
+			Log("Loading LaunchTube extension from: %s", launchtubeExt)
+		}
+
+		// uBlock Origin Lite
+		ublockExt := filepath.Join(bm.assetDir, "extensions", "ublock-origin")
+		if _, err := os.Stat(ublockExt); err == nil {
+			extensions = append(extensions, ublockExt)
+			Log("Loading uBlock Origin from: %s", ublockExt)
+		}
+
+		if len(extensions) > 0 {
+			args = append(args, "--load-extension="+strings.Join(extensions, ","))
 		}
 	}
 

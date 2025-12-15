@@ -3,6 +3,7 @@ package main
 import (
 	"embed"
 	"flag"
+	"fmt"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -17,7 +18,15 @@ func main() {
 	// Parse command line flags
 	userFlag := flag.String("user", "", "Username to auto-select on startup (case-insensitive)")
 	appFlag := flag.String("app", "", "App name to launch directly (case-insensitive, requires --user if multiple profiles exist)")
+	versionFlag := flag.Bool("version", false, "Print version and exit")
 	flag.Parse()
+
+	if *versionFlag {
+		fmt.Printf("Launch Tube %s\n", version)
+		fmt.Printf("Build: %s\n", buildDate)
+		fmt.Printf("Commit: %s\n", commit)
+		return
+	}
 
 	// Initialize logging
 	initLog()

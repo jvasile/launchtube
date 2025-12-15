@@ -9,6 +9,7 @@ export namespace main {
 	    imagePath?: string;
 	    colorValue: number;
 	    showName: boolean;
+	    focusAlert?: boolean;
 	    serviceId?: string;
 	
 	    static createFrom(source: any = {}) {
@@ -25,6 +26,7 @@ export namespace main {
 	        this.imagePath = source["imagePath"];
 	        this.colorValue = source["colorValue"];
 	        this.showName = source["showName"];
+	        this.focusAlert = source["focusAlert"];
 	        this.serviceId = source["serviceId"];
 	    }
 	}

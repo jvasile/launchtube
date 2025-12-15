@@ -1015,6 +1015,13 @@ function showAppEditDialog(index) {
         </label>
       </div>
 
+      <div class="dialog-field checkbox-field website-field" ${app.type !== 0 ? 'style="display:none"' : ''}>
+        <label>
+          <input type="checkbox" id="appFocusAlert" ${app.focusAlert ? 'checked' : ''}>
+          Show focus alert on launch
+        </label>
+      </div>
+
       <div class="dialog-buttons">
         <button class="dialog-btn delete-btn" id="appDeleteBtn">Delete</button>
         <div class="dialog-spacer"></div>
@@ -1149,6 +1156,7 @@ function showAppEditDialog(index) {
     app.imagePath = document.getElementById('appImagePath').value.trim() || null;
     app.colorValue = selectedColor;
     app.showName = document.getElementById('appShowName').checked;
+    app.focusAlert = type === 0 ? document.getElementById('appFocusAlert').checked : false;
 
     await saveApps();
     closeDialog();

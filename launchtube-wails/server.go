@@ -49,6 +49,7 @@ type AppConfig struct {
 	ImagePath   string   `json:"imagePath,omitempty"`
 	ColorValue  int      `json:"colorValue"`
 	ShowName    bool     `json:"showName"`
+	FocusAlert  bool     `json:"focusAlert,omitempty"`
 	ServiceID   string   `json:"serviceId,omitempty"`
 }
 
@@ -199,6 +200,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/1/version", s.handleVersion)
 	mux.HandleFunc("/api/1/status", s.handleStatus)
 	mux.HandleFunc("/api/1/match", s.handleMatch)
+	mux.HandleFunc("/api/1/focus-alert", s.handleFocusAlert)
 	mux.HandleFunc("/api/1/service/", s.handleService)
 	mux.HandleFunc("/api/1/kv/", s.handleKV)
 	mux.HandleFunc("/api/1/player/play", s.handlePlayerPlay)
@@ -218,6 +220,12 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/1/image", s.handleImage)
 	mux.HandleFunc("/api/1/services", s.handleServiceLibrary)
 	mux.HandleFunc("/api/1/shutdown", s.handleShutdown)
+	mux.HandleFunc("/youtube-loader", s.handleYouTubeLoader)
+}
+
+func (s *Server) handleYouTubeLoader(w http.ResponseWriter, r *http.Request) {
+	htmlPath := filepath.Join(s.assetDir, "youtube-loader.html")
+	http.ServeFile(w, r, htmlPath)
 }
 
 func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
@@ -289,6 +297,39 @@ func (s *Server) handleMatch(w http.ResponseWriter, r *http.Request) {
 	serviceID := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(matchedServiceName, " ", "-"), "+", ""))
 	serviceVersion := r.URL.Query().Get("version")
 	s.serveServiceScript(w, serviceID, serviceVersion)
+}
+
+func (s *Server) handleFocusAlert(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	pageURL := r.URL.Query().Get("url")
+	if pageURL == "" {
+		json.NewEncoder(w).Encode(map[string]bool{"focusAlert": false})
+		return
+	}
+
+	profileID := r.URL.Query().Get("profile")
+	apps := s.GetAppsForProfile(profileID)
+	normalizedPageURL := normalizeURL(pageURL)
+
+	for _, app := range apps {
+		urlsToCheck := []string{}
+		if app.URL != "" {
+			urlsToCheck = append(urlsToCheck, app.URL)
+		}
+		urlsToCheck = append(urlsToCheck, app.MatchURLs...)
+
+		for _, checkURL := range urlsToCheck {
+			normalizedAppURL := normalizeURL(checkURL)
+			if strings.HasPrefix(normalizedPageURL, normalizedAppURL) {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]bool{"focusAlert": app.FocusAlert})
+				return
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]bool{"focusAlert": false})
 }
 
 func normalizeURL(url string) string {

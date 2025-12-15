@@ -12,11 +12,17 @@ export function GetApps(arg1:string):Promise<Array<main.AppConfig>>;
 
 export function GetBrowsers():Promise<Array<main.BrowserInfo>>;
 
+export function GetInitialApp():Promise<string>;
+
+export function GetInitialUser():Promise<string>;
+
 export function GetLogoPath():Promise<string>;
 
 export function GetMpvOptions():Promise<string>;
 
 export function GetMpvPaths():Promise<Array<string>>;
+
+export function GetProfileCount():Promise<number>;
 
 export function GetProfilePhotos():Promise<Array<string>>;
 
@@ -31,8 +37,6 @@ export function GetServiceLibrary():Promise<Array<main.ServiceTemplate>>;
 export function GetVersion():Promise<Record<string, string>>;
 
 export function LaunchApp(arg1:main.AppConfig,arg2:string,arg3:string):Promise<void>;
-
-export function LaunchBrowserAdmin(arg1:string):Promise<void>;
 
 export function Quit():Promise<void>;
 

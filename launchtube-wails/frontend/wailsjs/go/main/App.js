@@ -22,6 +22,14 @@ export function GetBrowsers() {
   return window['go']['main']['App']['GetBrowsers']();
 }
 
+export function GetInitialApp() {
+  return window['go']['main']['App']['GetInitialApp']();
+}
+
+export function GetInitialUser() {
+  return window['go']['main']['App']['GetInitialUser']();
+}
+
 export function GetLogoPath() {
   return window['go']['main']['App']['GetLogoPath']();
 }
@@ -32,6 +40,10 @@ export function GetMpvOptions() {
 
 export function GetMpvPaths() {
   return window['go']['main']['App']['GetMpvPaths']();
+}
+
+export function GetProfileCount() {
+  return window['go']['main']['App']['GetProfileCount']();
 }
 
 export function GetProfilePhotos() {
@@ -60,10 +72,6 @@ export function GetVersion() {
 
 export function LaunchApp(arg1, arg2, arg3) {
   return window['go']['main']['App']['LaunchApp'](arg1, arg2, arg3);
-}
-
-export function LaunchBrowserAdmin(arg1) {
-  return window['go']['main']['App']['LaunchBrowserAdmin'](arg1);
 }
 
 export function Quit() {

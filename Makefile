@@ -1,27 +1,18 @@
-VERSION := 1.1.0
-GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
-BUILD_DATE := $(shell date -u +"%Y-%m-%d" 2>/dev/null || echo unknown)
-
-DART_DEFINES := --dart-define=APP_VERSION=$(VERSION) \
-                --dart-define=GIT_COMMIT=$(GIT_COMMIT) \
-                --dart-define=BUILD_DATE=$(BUILD_DATE)
-
-GO_LDFLAGS := -X main.version=$(VERSION) -X main.commit=$(GIT_COMMIT) -X main.buildDate=$(BUILD_DATE)
-
-.PHONY: build linux windows clean run
+.PHONY: build linux windows clean run dev
 
 build: linux
 
 linux:
-	flutter build linux $(DART_DEFINES)
-	cd server && GOOS=linux GOARCH=amd64 go build -ldflags "$(GO_LDFLAGS)" -o launchtube-server .
+	$(MAKE) -C launchtube-wails linux
 
 windows:
-	flutter build windows $(DART_DEFINES)
-	cd server && GOOS=windows GOARCH=amd64 go build -ldflags "$(GO_LDFLAGS)" -o launchtube-server.exe .
+	$(MAKE) -C launchtube-wails windows
 
-run:
-	flutter run $(DART_DEFINES)
+dev:
+	$(MAKE) -C launchtube-wails dev
+
+run: linux
+	./launchtube-wails/build/bin/launchtube-wails
 
 clean:
-	flutter clean
+	$(MAKE) -C launchtube-wails clean

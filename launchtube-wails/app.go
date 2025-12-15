@@ -16,15 +16,34 @@ import (
 
 // App struct - main Wails application
 type App struct {
-	ctx    context.Context
-	server *Server
+	ctx         context.Context
+	server      *Server
+	initialUser string
+	initialApp  string
 }
 
 // NewApp creates a new App application struct
-func NewApp(server *Server) *App {
+func NewApp(server *Server, initialUser, initialApp string) *App {
 	return &App{
-		server: server,
+		server:      server,
+		initialUser: initialUser,
+		initialApp:  initialApp,
 	}
+}
+
+// GetInitialUser returns the user specified via --user flag (for auto-login)
+func (a *App) GetInitialUser() string {
+	return a.initialUser
+}
+
+// GetInitialApp returns the app specified via --app flag (for direct launch)
+func (a *App) GetInitialApp() string {
+	return a.initialApp
+}
+
+// GetProfileCount returns the number of profiles (for --app validation)
+func (a *App) GetProfileCount() int {
+	return len(a.GetProfiles())
 }
 
 // startup is called when the app starts
@@ -39,6 +58,11 @@ func (a *App) startup(ctx context.Context) {
 	a.server.SetOnPlayerExit(func() {
 		Log("Player exited, showing window")
 		runtime.WindowShow(a.ctx)
+	})
+	// Set up shutdown callback
+	a.server.SetOnShutdown(func() {
+		Log("Shutdown requested via API")
+		runtime.Quit(a.ctx)
 	})
 }
 
@@ -119,19 +143,21 @@ func (a *App) LaunchApp(app AppConfig, profileID string, browserName string) err
 	if app.Type == 0 && app.URL != "" {
 		// Website - launch browser and hide window
 		runtime.WindowHide(a.ctx)
-		return a.server.LaunchBrowser(browserName, app.URL, profileID)
+		err := a.server.LaunchBrowser(browserName, app.URL, profileID)
+		if err != nil {
+			runtime.WindowShow(a.ctx)
+		}
+		return err
 	} else if app.CommandLine != "" {
 		// Native app
 		runtime.WindowHide(a.ctx)
-		return a.server.LaunchApp(app.CommandLine, profileID)
+		err := a.server.LaunchApp(app.CommandLine, profileID)
+		if err != nil {
+			runtime.WindowShow(a.ctx)
+		}
+		return err
 	}
 	return nil
-}
-
-// LaunchBrowserAdmin launches browser in admin mode
-func (a *App) LaunchBrowserAdmin(browserName string) error {
-	runtime.WindowHide(a.ctx)
-	return a.server.browserMgr.LaunchAdmin(browserName, "", a.server.port)
 }
 
 // CloseBrowser closes the running browser
@@ -177,6 +203,15 @@ type ServiceTemplate struct {
 
 // CreateProfile creates a new profile
 func (a *App) CreateProfile(displayName string, colorValue int) (Profile, error) {
+	// Check for duplicate name (case-insensitive)
+	profiles := a.GetProfiles()
+	nameLower := strings.ToLower(displayName)
+	for _, p := range profiles {
+		if strings.ToLower(p.DisplayName) == nameLower {
+			return Profile{}, fmt.Errorf("a user with this name already exists")
+		}
+	}
+
 	// Generate ID from display name
 	id := strings.ToLower(strings.ReplaceAll(displayName, " ", "-"))
 	id = strings.Map(func(r rune) rune {
@@ -191,8 +226,6 @@ func (a *App) CreateProfile(displayName string, colorValue int) (Profile, error)
 		return Profile{}, err
 	}
 
-	// Get next order
-	profiles := a.GetProfiles()
 	order := len(profiles)
 
 	profile := Profile{
@@ -222,6 +255,15 @@ func (a *App) CreateProfile(displayName string, colorValue int) (Profile, error)
 
 // UpdateProfile updates an existing profile
 func (a *App) UpdateProfile(id string, displayName string, colorValue int, photoPath string, order int) error {
+	// Check for duplicate name (case-insensitive), excluding current profile
+	profiles := a.GetProfiles()
+	nameLower := strings.ToLower(displayName)
+	for _, p := range profiles {
+		if p.ID != id && strings.ToLower(p.DisplayName) == nameLower {
+			return fmt.Errorf("a user with this name already exists")
+		}
+	}
+
 	profileDir := filepath.Join(a.server.dataDir, "profiles", id)
 	profilePath := filepath.Join(profileDir, "profile.json")
 

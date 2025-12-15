@@ -2,6 +2,7 @@ package main
 
 import (
 	"embed"
+	"flag"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -13,6 +14,11 @@ import (
 var assets embed.FS
 
 func main() {
+	// Parse command line flags
+	userFlag := flag.String("user", "", "Username to auto-select on startup (case-insensitive)")
+	appFlag := flag.String("app", "", "App name to launch directly (case-insensitive, requires --user if multiple profiles exist)")
+	flag.Parse()
+
 	// Initialize logging
 	initLog()
 
@@ -26,7 +32,7 @@ func main() {
 	Log("Data directory: %s", server.dataDir)
 
 	// Create Wails app
-	app := NewApp(server)
+	app := NewApp(server, *userFlag, *appFlag)
 
 	// Run Wails application
 	err := wails.Run(&options.App{

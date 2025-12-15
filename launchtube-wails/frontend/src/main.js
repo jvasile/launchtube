@@ -1,5 +1,5 @@
 import './style.css';
-import { GetProfiles, GetApps, GetBrowsers, LaunchApp, Quit, SaveApps, GetServerPort, GetVersion, CreateProfile, UpdateProfile, DeleteProfile, GetProfilePhotos, GetLogoPath, LaunchBrowserAdmin, GetMpvPaths, GetSelectedMpv, SetSelectedMpv, GetMpvOptions, SetMpvOptions, CloseBrowser } from '../wailsjs/go/main/App';
+import { GetProfiles, GetApps, GetBrowsers, LaunchApp, Quit, SaveApps, GetServerPort, GetVersion, CreateProfile, UpdateProfile, DeleteProfile, GetProfilePhotos, GetLogoPath, GetMpvPaths, GetSelectedMpv, SetSelectedMpv, GetMpvOptions, SetMpvOptions, CloseBrowser, GetInitialUser, GetInitialApp, GetProfileCount } from '../wailsjs/go/main/App';
 
 // State
 let currentProfile = null;
@@ -55,9 +55,65 @@ async function init() {
     const res = await fetch(`http://localhost:${serverPort}/api/1/services`);
     serviceLibrary = await res.json();
 
+    // Check for --user and --app flags
+    const initialUser = await GetInitialUser();
+    const initialApp = await GetInitialApp();
+
     if (profiles.length === 0) {
       // No profiles - show create profile screen
       showProfileEdit('new');
+    } else if (initialApp) {
+      // Direct app launch mode
+      let targetProfile = null;
+
+      if (initialUser) {
+        // User specified - find that user
+        const userLower = initialUser.toLowerCase();
+        targetProfile = profiles.find(p => p.displayName.toLowerCase() === userLower);
+        if (!targetProfile) {
+          console.error(`User "${initialUser}" not found`);
+          showProfileSelector();
+          return;
+        }
+      } else if (profiles.length === 1) {
+        // Only one user - use it
+        targetProfile = profiles[0];
+      } else {
+        // Multiple users, no --user specified
+        console.error('--app requires --user when multiple profiles exist');
+        showProfileSelector();
+        return;
+      }
+
+      // Find and launch the app
+      currentProfile = targetProfile;
+      const profileApps = await GetApps(currentProfile.id) || [];
+      const appLower = initialApp.toLowerCase();
+      const targetApp = profileApps.find(a => a.name.toLowerCase() === appLower);
+
+      if (targetApp) {
+        console.log(`Launching app "${targetApp.name}" for user "${currentProfile.displayName}"`);
+        try {
+          await LaunchApp(targetApp, currentProfile.id, selectedBrowser);
+        } catch (err) {
+          console.error('Failed to launch app:', err);
+          showLauncher();
+        }
+      } else {
+        console.error(`App "${initialApp}" not found for user "${currentProfile.displayName}"`);
+        showLauncher();
+      }
+    } else if (initialUser) {
+      // Auto-select user from --user flag (case-insensitive)
+      const userLower = initialUser.toLowerCase();
+      const matchedProfile = profiles.find(p => p.displayName.toLowerCase() === userLower);
+      if (matchedProfile) {
+        currentProfile = matchedProfile;
+        showLauncher();
+      } else {
+        console.warn(`User "${initialUser}" not found, showing profile selector`);
+        showProfileSelector();
+      }
     } else if (profiles.length === 1) {
       currentProfile = profiles[0];
       showLauncher();
@@ -608,13 +664,6 @@ function renderLauncher() {
         <span class="popup-icon">&#9881;</span>
         <span>Settings</span>
       </div>
-      ${browsers.map((b, i) => `
-        <div class="popup-item browser-admin-item" data-browser="${i}" tabindex="-1">
-          <span class="popup-icon">&#9874;</span>
-          <span>Administer ${escapeHtml(b.name)}</span>
-        </div>
-      `).join('')}
-      <div class="popup-divider"></div>
       <div class="popup-item" id="switchUserBtn" tabindex="-1">
         <span class="popup-icon">&#9679;</span>
         <span>Switch User</span>
@@ -705,15 +754,6 @@ function bindLauncherEvents() {
   });
   document.getElementById('exitBtn')?.addEventListener('click', () => Quit());
 
-  // Browser admin items
-  document.querySelectorAll('.browser-admin-item').forEach(item => {
-    item.addEventListener('click', () => {
-      const idx = parseInt(item.dataset.browser);
-      togglePopupMenu();
-      openBrowserAdmin(browsers[idx]);
-    });
-  });
-
   // App tiles - click to launch
   document.querySelectorAll('.app-tile:not(.add-tile)').forEach((tile) => {
     const idx = parseInt(tile.dataset.index);
@@ -777,14 +817,6 @@ function handleMenuKeydown(e) {
     e.preventDefault();
     togglePopupMenu();
     document.getElementById('menuBtn')?.focus();
-  }
-}
-
-async function openBrowserAdmin(browser) {
-  try {
-    await LaunchBrowserAdmin(browser.name);
-  } catch (err) {
-    alert('Failed to open admin browser: ' + err);
   }
 }
 

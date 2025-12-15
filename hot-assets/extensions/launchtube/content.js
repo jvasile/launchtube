@@ -1,68 +1,55 @@
-// LaunchTube Loader - Content Script (runs in MAIN world)
+// LaunchTube Loader - Content Script (runs in MAIN world at document_start)
 (function() {
     'use strict';
 
-    const VERSION = '2.1';
     const PORTS = [8765, 8766, 8767, 8768, 8769];
     let detectedPort = null;
-    let activeProfileId = null;
 
-    // Bridge for fetch requests (bypasses CSP via background service worker)
-    const pendingRequests = new Map();
-    let requestId = 0;
-
-    window.addEventListener('message', (event) => {
-        if (event.source !== window) return;
-        if (!event.data || event.data.direction !== 'launchtube-from-bridge') return;
-
-        const { id, response } = event.data;
-        const pending = pendingRequests.get(id);
-        if (pending) {
-            pendingRequests.delete(id);
-            pending.resolve(response);
-        }
-    });
-
-    function bridgedFetch(url, options) {
-        return new Promise((resolve, reject) => {
-            const id = ++requestId;
-            const timeout = setTimeout(() => {
-                pendingRequests.delete(id);
-                reject(new Error('Bridge fetch timeout'));
-            }, 5000);
-
-            pendingRequests.set(id, {
-                resolve: (response) => {
-                    clearTimeout(timeout);
-                    resolve(response);
-                }
+    // Create 'default' TrustedTypes policy early (before page CSP kicks in)
+    // The 'default' policy is used as fallback for all assignments
+    let trustedPolicy = null;
+    if (window.trustedTypes && window.trustedTypes.createPolicy) {
+        try {
+            trustedPolicy = window.trustedTypes.createPolicy('default', {
+                createHTML: (s) => s,
+                createScript: (s) => s,
+                createScriptURL: (s) => s,
             });
-
-            window.postMessage({
-                direction: 'launchtube-to-bridge',
-                id: id,
-                type: 'fetch',
-                url: url,
-                options: options
-            }, '*');
-        });
+            console.log('[LaunchTube] Created default TrustedTypes policy');
+        } catch (e) {
+            // Default policy may already exist
+            console.log('[LaunchTube] Could not create default TrustedTypes policy:', e.message);
+            // Try a named policy as fallback
+            try {
+                trustedPolicy = window.trustedTypes.createPolicy('launchtube', {
+                    createHTML: (s) => s,
+                    createScript: (s) => s,
+                    createScriptURL: (s) => s,
+                });
+            } catch (e2) {
+                console.log('[LaunchTube] Could not create any TrustedTypes policy');
+            }
+        }
     }
 
     // Try to connect to a specific port
     async function tryPort(port) {
-        const response = await bridgedFetch(`http://localhost:${port}/api/1/ping`);
-        if (response.ok) {
-            try {
-                const data = JSON.parse(response.text);
+        try {
+            const response = await fetch(`http://localhost:${port}/api/1/ping`, {
+                method: 'GET',
+                signal: AbortSignal.timeout(1000)
+            });
+            if (response.ok) {
+                const data = await response.json();
                 if (data.app === 'launchtube') {
                     return port;
                 }
-            } catch (e) {}
-        }
-        throw new Error('Not LaunchTube');
+            }
+        } catch (e) {}
+        throw new Error('Not Launch Tube');
     }
 
-    // Find the LaunchTube server
+    // Find the Launch Tube server
     async function findServer() {
         for (const port of PORTS) {
             try {
@@ -76,7 +63,7 @@
     function serverLog(message, level = 'info') {
         console.log(`[LaunchTube] ${message}`);
         if (detectedPort) {
-            bridgedFetch(`http://localhost:${detectedPort}/api/1/log`, {
+            fetch(`http://localhost:${detectedPort}/api/1/log`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ message: `[Loader] ${message}`, level })
@@ -84,39 +71,68 @@
         }
     }
 
-    // Get active profile from server
-    async function fetchActiveProfile(port) {
-        try {
-            const response = await bridgedFetch(`http://localhost:${port}/api/1/profile`);
-            if (response.ok) {
-                const data = JSON.parse(response.text);
-                if (data.profileId) {
-                    activeProfileId = data.profileId;
-                    serverLog(`Active profile: ${activeProfileId}`);
-                }
-            }
-        } catch (e) {
-            serverLog(`Failed to fetch profile: ${e.message}`, 'warn');
-        }
-    }
-
     // Load and execute script
     async function loadScript(port) {
         try {
-            let url = `http://localhost:${port}/api/1/match?url=${encodeURIComponent(location.href)}`;
-            if (activeProfileId) {
-                url += `&profile=${encodeURIComponent(activeProfileId)}`;
-            }
-            const response = await bridgedFetch(url);
-            if (response.ok && response.text) {
-                const code = response.text;
-                serverLog(`Got script (${code.length} chars), executing...`);
-                window.LAUNCH_TUBE_PORT = port;
-                try {
-                    eval(code);
-                    serverLog('Script executed successfully');
-                } catch (e) {
-                    serverLog(`Script error: ${e.message}`, 'error');
+            const response = await fetch(
+                `http://localhost:${port}/api/1/match?url=${encodeURIComponent(location.href)}`
+            );
+            if (response.ok) {
+                const code = await response.text();
+                if (code) {
+                    serverLog(`Got script (${code.length} chars), executing...`);
+                    window.LAUNCH_TUBE_PORT = port;
+
+                    // Try multiple methods to execute the script
+                    let executed = false;
+
+                    // Method 1: Function constructor (may bypass some CSP)
+                    if (!executed) {
+                        try {
+                            const fn = new Function(code);
+                            fn();
+                            executed = true;
+                            serverLog('Script executed via Function()');
+                        } catch (e) {
+                            serverLog(`Function() failed: ${e.message}`);
+                        }
+                    }
+
+                    // Method 2: eval with TrustedScript
+                    if (!executed && trustedPolicy) {
+                        try {
+                            eval(trustedPolicy.createScript(code));
+                            executed = true;
+                            serverLog('Script executed via trusted eval()');
+                        } catch (e) {
+                            serverLog(`Trusted eval() failed: ${e.message}`);
+                        }
+                    }
+
+                    // Method 3: Blob URL
+                    if (!executed) {
+                        try {
+                            const blob = new Blob([code], { type: 'application/javascript' });
+                            const blobUrl = URL.createObjectURL(blob);
+                            const script = document.createElement('script');
+                            if (trustedPolicy) {
+                                script.src = trustedPolicy.createScriptURL(blobUrl);
+                            } else {
+                                script.src = blobUrl;
+                            }
+                            script.onload = () => {
+                                URL.revokeObjectURL(blobUrl);
+                                serverLog('Script executed via blob URL');
+                            };
+                            script.onerror = () => {
+                                URL.revokeObjectURL(blobUrl);
+                                serverLog('Blob URL failed to load', 'error');
+                            };
+                            (document.head || document.documentElement).appendChild(script);
+                        } catch (e) {
+                            serverLog(`Blob URL failed: ${e.message}`, 'error');
+                        }
+                    }
                 }
             }
         } catch (e) {
@@ -128,10 +144,10 @@
     function setupHelpers(port) {
         window.LAUNCH_TUBE_PORT = port;
         window.launchTubeCloseTab = function() {
-            bridgedFetch(`http://localhost:${port}/api/1/browser/close`, { method: 'POST' }).catch(() => {});
+            fetch(`http://localhost:${port}/api/1/browser/close`, { method: 'POST' }).catch(() => {});
         };
         window.launchTubeLog = function(message, level) {
-            bridgedFetch(`http://localhost:${port}/api/1/log`, {
+            fetch(`http://localhost:${port}/api/1/log`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ message: message, level: level || 'info' })
@@ -141,18 +157,15 @@
 
     // Main
     async function main() {
-        console.log(`[LaunchTube] Content v${VERSION} starting on ${location.hostname}`);
+        console.log('Launch Tube: Loader starting on', location.hostname);
 
         const port = await findServer();
         if (!port) {
-            console.log('[LaunchTube] Server not found');
+            console.log('Launch Tube: Server not found');
             return;
         }
         detectedPort = port;
         serverLog('Found server on port ' + port);
-
-        // Fetch active profile before loading script
-        await fetchActiveProfile(port);
 
         setupHelpers(port);
 

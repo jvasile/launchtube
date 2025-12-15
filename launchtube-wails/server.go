@@ -33,8 +33,11 @@ type Server struct {
 	appsProfile  string
 	appsLoadTime time.Time
 	browserMgr   *BrowserManager
+	cdpBrowser   *CDPBrowser
+	useCDP       bool // Use CDP-based browser instead of extension-based
 	activeProfile string
 	onBrowserExit func()
+	onShutdown    func()
 }
 
 type AppConfig struct {
@@ -54,13 +57,23 @@ func NewServer() *Server {
 	dataDir := filepath.Join(home, ".local", "share", "launchtube")
 	assetDir := findAssetDirectory()
 
+	// Extension mode is default (CDP triggers bot detection on YouTube etc)
+	useCDP := os.Getenv("LAUNCHTUBE_USE_CDP") == "1"
+
 	s := &Server{
 		assetDir:   assetDir,
 		dataDir:    dataDir,
 		kvStore:    NewKVStore(),
 		player:     NewPlayer(),
 		fileCache:  NewFileCache(),
-		browserMgr: NewBrowserManager(assetDir, dataDir),
+		browserMgr: NewBrowserManager(assetDir, dataDir), // Kept as fallback
+		useCDP:     useCDP,
+	}
+
+	if useCDP {
+		Log("Using CDP-based browser (set LAUNCHTUBE_USE_CDP=1)")
+	} else {
+		Log("Using extension-based browser")
 	}
 
 	return s
@@ -73,6 +86,10 @@ func (s *Server) SetOnBrowserExit(fn func()) {
 
 func (s *Server) SetOnPlayerExit(fn func()) {
 	s.player.SetOnExit(fn)
+}
+
+func (s *Server) SetOnShutdown(fn func()) {
+	s.onShutdown = fn
 }
 
 func (s *Server) GetAppsForProfile(profileID string) []AppConfig {
@@ -200,6 +217,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/install", s.handleInstall)
 	mux.HandleFunc("/api/1/image", s.handleImage)
 	mux.HandleFunc("/api/1/services", s.handleServiceLibrary)
+	mux.HandleFunc("/api/1/shutdown", s.handleShutdown)
 }
 
 func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
@@ -279,6 +297,51 @@ func normalizeURL(url string) string {
 	normalized = strings.TrimPrefix(normalized, "http://")
 	normalized = strings.TrimPrefix(normalized, "www.")
 	return normalized
+}
+
+// GetServiceScript returns the service script for a given URL, or empty string if none
+func (s *Server) GetServiceScript(pageURL, profileID string) string {
+	apps := s.GetAppsForProfile(profileID)
+	normalizedPageURL := normalizeURL(pageURL)
+
+	var matchedServiceName string
+	for _, app := range apps {
+		urlsToCheck := []string{}
+		if app.URL != "" {
+			urlsToCheck = append(urlsToCheck, app.URL)
+		}
+		urlsToCheck = append(urlsToCheck, app.MatchURLs...)
+
+		if len(urlsToCheck) == 0 {
+			continue
+		}
+
+		for _, checkURL := range urlsToCheck {
+			normalizedAppURL := normalizeURL(checkURL)
+			if strings.HasPrefix(normalizedPageURL, normalizedAppURL) {
+				matchedServiceName = app.Name
+				break
+			}
+		}
+		if matchedServiceName != "" {
+			break
+		}
+	}
+
+	if matchedServiceName == "" {
+		return ""
+	}
+
+	serviceID := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(matchedServiceName, " ", "-"), "+", ""))
+	scriptPath := filepath.Join(s.assetDir, "services", serviceID+".js")
+
+	content, _, err := s.fileCache.GetString(scriptPath)
+	if err != nil {
+		Log("GetServiceScript: Script not found for %s at %s", serviceID, scriptPath)
+		return ""
+	}
+
+	return fmt.Sprintf("window.LAUNCH_TUBE_VERSION = \"%s\";\n%s", version, content)
 }
 
 func (s *Server) handleService(w http.ResponseWriter, r *http.Request) {
@@ -540,24 +603,33 @@ func (s *Server) handlePlayerStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePlayerStop(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
-		return
-	}
 	s.player.Stop()
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprintf(w, `{"status":"ok"}`)
 }
 
 func (s *Server) handleBrowserClose(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
-		return
-	}
 	Log("API: /api/1/browser/close called")
-	s.browserMgr.Close()
+	s.CloseBrowser()
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprintf(w, `{"status":"ok"}`)
+}
+
+func (s *Server) handleShutdown(w http.ResponseWriter, r *http.Request) {
+	Log("API: /api/1/shutdown called")
+	// Stop player and close browser
+	s.player.Stop()
+	s.CloseBrowser()
+	// Respond before triggering shutdown
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprintf(w, `{"status":"ok","message":"shutting down"}`)
+	// Trigger application shutdown via callback
+	if s.onShutdown != nil {
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			s.onShutdown()
+		}()
+	}
 }
 
 func (s *Server) handleBrowserStatus(w http.ResponseWriter, r *http.Request) {
@@ -681,8 +753,22 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 
 // LaunchBrowser launches a browser with the given URL
 func (s *Server) LaunchBrowser(browserName, url, profileID string) error {
-	Log("Launching browser: %s url=%s profile=%s", browserName, url, profileID)
+	Log("Launching browser: %s url=%s profile=%s useCDP=%v", browserName, url, profileID, s.useCDP)
 	s.activeProfile = profileID
+
+	if s.useCDP {
+		// Initialize CDP browser if needed
+		if s.cdpBrowser == nil {
+			s.cdpBrowser = NewCDPBrowser(s.assetDir, s.dataDir, s.port)
+			if s.onBrowserExit != nil {
+				s.cdpBrowser.SetOnExit(s.onBrowserExit)
+			}
+			// Wire up script injection
+			s.cdpBrowser.SetGetScript(s.GetServiceScript)
+		}
+		return s.cdpBrowser.Launch(url, profileID)
+	}
+
 	return s.browserMgr.Launch(browserName, url, profileID, s.port)
 }
 
@@ -707,7 +793,11 @@ func (s *Server) LaunchApp(commandLine, profileID string) error {
 
 // CloseBrowser closes the running browser
 func (s *Server) CloseBrowser() {
-	s.browserMgr.Close()
+	if s.useCDP && s.cdpBrowser != nil {
+		s.cdpBrowser.Close()
+	} else {
+		s.browserMgr.Close()
+	}
 }
 
 // StopPlayer stops the media player

@@ -98,14 +98,28 @@ func (bm *BrowserManager) Launch(browserName, url, profileID string, serverPort 
 		args = append(args, "--user-data-dir="+profilePath)
 	}
 
-	// Add LaunchTube extension for script injection (Chrome/Chromium only)
+	// Load LaunchTube extension for Chrome/Chromium
 	if browser.Name != "Firefox" {
 		extensionPath := filepath.Join(bm.assetDir, "extensions", "launchtube")
-		args = append(args, "--load-extension="+extensionPath)
+		if _, err := os.Stat(extensionPath); err == nil {
+			args = append(args, "--load-extension="+extensionPath)
+			Log("Loading extension from: %s", extensionPath)
+		}
 	}
 
-	// Add remote debugging port
-	args = append(args, "--remote-debugging-port=9222")
+	// Chrome-specific flags
+	if browser.Name != "Firefox" {
+		args = append(args,
+			"--disable-infobars",
+			"--autoplay-policy=no-user-gesture-required",
+			"--hide-crash-restore-bubble",
+			"--disable-features=MediaRouter,GlobalMediaControls,LocalNetworkAccessChecks",
+			"--disable-device-discovery-notifications",
+			"--disable-sync",
+			"--no-first-run",
+			"--disable-default-apps",
+		)
+	}
 
 	// Add the URL
 	if browser.Name == "Firefox" && serverPort > 0 {
@@ -133,80 +147,6 @@ func (bm *BrowserManager) Launch(browserName, url, profileID string, serverPort 
 		cmd.Wait()
 		bm.mu.Lock()
 		Log("Browser process exited")
-		bm.cmd = nil
-		bm.pid = 0
-		bm.browser = nil
-		onExit := bm.onExit
-		bm.mu.Unlock()
-
-		if onExit != nil {
-			onExit()
-		}
-	}()
-
-	return nil
-}
-
-func (bm *BrowserManager) LaunchAdmin(browserName, profileID string, serverPort int) error {
-	bm.mu.Lock()
-	defer bm.mu.Unlock()
-
-	// Check if already running
-	if bm.cmd != nil {
-		return &BrowserError{Message: "Browser is already running. Please close it first."}
-	}
-
-	// Find the browser
-	browser := bm.FindBrowser(browserName)
-	if browser == nil {
-		browsers := bm.DetectBrowsers()
-		if len(browsers) == 0 {
-			return &BrowserError{Message: "No browser found"}
-		}
-		browser = &browsers[0]
-	}
-
-	var args []string
-
-	// Use --start-maximized for Chrome/Chromium admin mode, nothing for Firefox
-	if browser.Name != "Firefox" {
-		args = append(args, "--start-maximized")
-
-		// Add user-data-dir for Chrome/Chromium profile isolation
-		if profileID != "" {
-			profilePath := filepath.Join(bm.dataDir, "profiles", profileID, "chrome")
-			args = append(args, "--user-data-dir="+profilePath)
-		}
-
-		// Add LaunchTube extension for script injection
-		extensionPath := filepath.Join(bm.assetDir, "extensions", "launchtube")
-		args = append(args, "--load-extension="+extensionPath)
-	}
-
-	// Add remote debugging port
-	args = append(args, "--remote-debugging-port=9222")
-
-	// Add setup URL
-	args = append(args, fmt.Sprintf("http://localhost:%d/setup?target=", serverPort))
-
-	Log("Launching admin browser: %s %v", browser.Executable, args)
-
-	cmd := exec.Command(browser.Executable, args...)
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-
-	bm.cmd = cmd
-	bm.pid = cmd.Process.Pid
-	bm.browser = browser
-
-	Log("Admin browser started with PID: %d", bm.pid)
-
-	// Watch for exit
-	go func() {
-		cmd.Wait()
-		bm.mu.Lock()
-		Log("Admin browser process exited")
 		bm.cmd = nil
 		bm.pid = 0
 		bm.browser = nil

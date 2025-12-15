@@ -91,7 +91,8 @@ func (bm *BrowserManager) Launch(browserName, url, profileID string, serverPort 
 		browser = &browsers[0]
 	}
 
-	args := []string{browser.FullscreenFlag}
+	// Don't use --start-fullscreen; let the script handle fullscreen on user gesture
+	args := []string{}
 
 	// Add user-data-dir for Chrome/Chromium profile isolation
 	if profileID != "" && browser.Name != "Firefox" {
@@ -134,7 +135,18 @@ func (bm *BrowserManager) Launch(browserName, url, profileID string, serverPort 
 			"--no-first-run",
 			"--disable-default-apps",
 			"--force-dark-mode",
+			"--enable-features=AutomaticFullscreenContentSetting",
+			"--start-fullscreen",
 		)
+
+		// Create policy file for automatic fullscreen permission
+		if profileID != "" {
+			policyDir := filepath.Join(bm.dataDir, "profiles", profileID, "chrome", "policies", "managed")
+			os.MkdirAll(policyDir, 0755)
+			policyFile := filepath.Join(policyDir, "launchtube.json")
+			policy := `{"AutomaticFullscreenAllowedForUrls": ["https://www.youtube.com", "https://youtube.com", "*"]}`
+			os.WriteFile(policyFile, []byte(policy), 0644)
+		}
 	}
 
 	// Add the URL

@@ -121,6 +121,19 @@
         }
     }
 
+    function enableTheaterModeIfNeeded() {
+        const player = document.querySelector('#movie_player');
+        if (!player) return;
+        if (player.classList.contains('ytp-fullscreen')) return; // Already fullscreen
+        if (player.classList.contains('ytp-big-mode')) return; // Already theater mode
+
+        const theaterBtn = document.querySelector('.ytp-size-button');
+        if (theaterBtn) {
+            serverLog('Enabling theater mode');
+            theaterBtn.click();
+        }
+    }
+
     function initSponsorBlock() {
         const video = document.querySelector('video');
         if (video) {
@@ -273,10 +286,22 @@
     function activateElement() {
         if (!selectedElement) return;
 
+        // Check if this is a video card
+        const isVideo = selectedElement.matches('ytd-rich-item-renderer, ytd-video-renderer, ytd-compact-video-renderer, ytd-grid-video-renderer, ytd-playlist-video-renderer');
+        serverLog(`Activating: isVideo=${isVideo}`);
+
+        // Go fullscreen immediately if activating a video
+        if (isVideo && !document.fullscreenElement) {
+            serverLog('Requesting fullscreen before navigation');
+            document.documentElement.requestFullscreen()
+                .then(() => serverLog('Fullscreen success'))
+                .catch(err => serverLog(`Fullscreen failed: ${err.message}`));
+        }
+
         // Find the clickable link or the element itself
         const link = selectedElement.querySelector('a#thumbnail, a#video-title, a') || selectedElement;
         if (link) {
-            serverLog('Activating selected element');
+            serverLog('Clicking link');
             link.click();
         }
     }
@@ -348,6 +373,28 @@
                 selectedElement = null;
             }
             setTimeout(autoSelectFirst, 500);
+
+            // Fullscreen YouTube player when navigating to video page
+            if (location.pathname === '/watch') {
+                setTimeout(() => {
+                    const player = document.querySelector('#movie_player');
+                    if (!player) return;
+
+                    // If fullscreen was requested, click YouTube's fullscreen button
+                    if (window._launchtubeFullscreenPlayer) {
+                        window._launchtubeFullscreenPlayer = false;
+                        const fullscreenBtn = document.querySelector('.ytp-fullscreen-button');
+                        if (fullscreenBtn && !player.classList.contains('ytp-fullscreen')) {
+                            serverLog('Clicking YouTube fullscreen button');
+                            fullscreenBtn.click();
+                            return;
+                        }
+                    }
+
+                    // Otherwise enable theater mode if not fullscreen
+                    enableTheaterModeIfNeeded();
+                }, 1000);
+            }
         }
     }
 
@@ -459,6 +506,27 @@
     // === Initialize ===
     function init() {
         serverLog('Initializing YouTube integration');
+
+        // Intercept clicks on video links - set flag to fullscreen player after navigation
+        document.addEventListener('click', (e) => {
+            const link = e.target.closest('a[href*="/watch"]');
+            if (link) {
+                serverLog('Video link click - will fullscreen player');
+                window._launchtubeFullscreenPlayer = true;
+            }
+        }, true);
+
+        // Enable theater mode when on video page (if not fullscreen)
+        if (location.pathname === '/watch') {
+            setTimeout(enableTheaterModeIfNeeded, 1000);
+        }
+
+        // Enable theater mode when exiting fullscreen
+        document.addEventListener('fullscreenchange', () => {
+            if (!document.fullscreenElement && location.pathname === '/watch') {
+                setTimeout(enableTheaterModeIfNeeded, 500);
+            }
+        });
 
         // Navigation
         document.addEventListener('keydown', handleNavKeydown, true);

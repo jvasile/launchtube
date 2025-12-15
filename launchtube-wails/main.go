@@ -1,0 +1,57 @@
+package main
+
+import (
+	"embed"
+
+	"github.com/wailsapp/wails/v2"
+	"github.com/wailsapp/wails/v2/pkg/options"
+	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"github.com/wailsapp/wails/v2/pkg/options/linux"
+)
+
+//go:embed all:frontend/dist
+var assets embed.FS
+
+func main() {
+	// Initialize logging
+	initLog()
+
+	// Create and start HTTP server (for browser extension/userscript API)
+	server := NewServer()
+	if err := server.Start(); err != nil {
+		Log("Warning: Failed to start HTTP server: %v", err)
+	}
+
+	Log("Asset directory: %s", server.assetDir)
+	Log("Data directory: %s", server.dataDir)
+
+	// Create Wails app
+	app := NewApp(server)
+
+	// Run Wails application
+	err := wails.Run(&options.App{
+		Title:            "LaunchTube",
+		Width:            1920,
+		Height:           1080,
+		MinWidth:         800,
+		MinHeight:        600,
+		Fullscreen:       true,
+		Frameless:        true,
+		DisableResize:    false,
+		BackgroundColour: &options.RGBA{R: 26, G: 26, B: 46, A: 255},
+		AssetServer: &assetserver.Options{
+			Assets: assets,
+		},
+		OnStartup: app.startup,
+		Bind: []interface{}{
+			app,
+		},
+		Linux: &linux.Options{
+			WindowIsTranslucent: false,
+		},
+	})
+
+	if err != nil {
+		Log("Error: %v", err)
+	}
+}

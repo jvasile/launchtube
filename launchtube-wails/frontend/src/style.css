@@ -1,0 +1,1116 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #1A1A2E;
+  color: white;
+}
+
+#app {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ========== PROFILE SELECTOR ========== */
+.profile-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 3vh;
+}
+
+.profile-logo {
+  height: 100px;
+  margin-bottom: 40px;
+}
+
+.profile-screen h1 {
+  font-size: 32px;
+  font-weight: bold;
+  margin-bottom: 40px;
+}
+
+.profile-grid {
+  display: flex;
+  gap: 3vw;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.profile-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s, border 0.2s;
+  padding: 2vh;
+  border-radius: 1vh;
+}
+
+.profile-tile:hover, .profile-tile:focus {
+  transform: scale(1.1);
+  outline: none;
+}
+
+.profile-tile:hover .profile-avatar, .profile-tile:focus .profile-avatar {
+  border: 4px solid white;
+  box-shadow: 0 0 20px 5px rgba(255, 255, 255, 0.5);
+}
+
+.profile-avatar {
+  width: 12vw;
+  height: 12vw;
+  max-width: 150px;
+  max-height: 150px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 5vw;
+  font-weight: bold;
+  color: white;
+  overflow: hidden;
+  border: 2px solid rgba(255, 255, 255, 0.38);
+  transition: border 0.2s, box-shadow 0.2s;
+}
+
+.profile-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.profile-name {
+  font-size: 18px;
+  font-weight: bold;
+  text-align: center;
+  color: white;
+}
+
+.profile-avatar-wrapper {
+  position: relative;
+}
+
+.profile-edit-btn {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  background: rgba(0, 0, 0, 0.5);
+  border: none;
+  border-radius: 20px;
+  color: white;
+  width: 36px;
+  height: 36px;
+  font-size: 20px;
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.profile-tile:hover .profile-edit-btn,
+.profile-tile:focus .profile-edit-btn {
+  display: flex;
+}
+
+.add-user-tile .profile-avatar {
+  background: rgba(255, 255, 255, 0.1) !important;
+  border: 2px solid rgba(255, 255, 255, 0.38) !important;
+}
+
+.add-user-tile:hover .profile-avatar,
+.add-user-tile:focus .profile-avatar {
+  background: rgba(255, 255, 255, 0.2) !important;
+  border: 4px solid white !important;
+  box-shadow: 0 0 20px 5px rgba(255, 255, 255, 0.3);
+}
+
+.add-avatar {
+  font-size: 5vw;
+  color: white;
+}
+
+/* ========== DIALOG STYLES ========== */
+.dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+.dialog {
+  background: #2A2A4E;
+  border-radius: 20px;
+  padding: 24px;
+  width: 400px;
+  max-width: 90vw;
+}
+
+.dialog-title {
+  font-size: 24px;
+  font-weight: bold;
+  color: white;
+  margin-bottom: 24px;
+}
+
+.dialog-field {
+  margin-bottom: 32px;
+}
+
+.dialog-input {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  padding: 12px 16px;
+  color: white;
+  font-size: 16px;
+  box-sizing: border-box;
+}
+
+.dialog-input:focus {
+  outline: none;
+  border-color: #2196F3;
+  border-width: 2px;
+}
+
+.avatar-pickers {
+  display: flex;
+  justify-content: center;
+  gap: 32px;
+  margin-bottom: 32px;
+}
+
+.avatar-picker {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  cursor: pointer;
+}
+
+.avatar-circle {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid rgba(255, 255, 255, 0.24);
+  overflow: hidden;
+  transition: border 0.2s, box-shadow 0.2s;
+}
+
+.avatar-circle img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.avatar-picker:hover .avatar-circle,
+.avatar-picker:focus .avatar-circle {
+  border: 3px solid #2196F3;
+  box-shadow: 0 0 8px rgba(33, 150, 243, 0.5);
+}
+
+.photo-circle {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.photo-icon {
+  font-size: 32px;
+  opacity: 0.54;
+}
+
+.color-circle span {
+  font-size: 32px;
+  font-weight: bold;
+}
+
+.avatar-label {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: rgba(255, 255, 255, 0.54);
+  font-size: 14px;
+}
+
+.avatar-label .check {
+  color: #4CAF50;
+}
+
+.dialog-buttons {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.dialog-spacer {
+  flex: 1;
+}
+
+.dialog-btn {
+  padding: 10px 20px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  background: transparent;
+  color: #2196F3;
+  transition: background 0.2s;
+}
+
+.dialog-btn:hover {
+  background: rgba(33, 150, 243, 0.1);
+}
+
+.dialog-btn.primary-btn {
+  background: #2196F3;
+  color: white;
+}
+
+.dialog-btn.primary-btn:hover {
+  background: #1976D2;
+}
+
+.dialog-btn.delete-btn {
+  color: #f44336;
+}
+
+.dialog-btn.delete-btn:hover {
+  background: rgba(244, 67, 54, 0.1);
+}
+
+.dialog-btn:focus {
+  outline: 2px solid #2196F3;
+  outline-offset: 2px;
+}
+
+.dialog-btn.delete-btn:focus {
+  outline-color: #f44336;
+}
+
+/* Picker dialogs */
+.picker-dialog {
+  width: auto;
+  min-width: 300px;
+}
+
+.picker-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  justify-content: center;
+  margin-bottom: 24px;
+}
+
+.picker-item {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid rgba(255, 255, 255, 0.24);
+  overflow: hidden;
+  transition: border 0.2s, box-shadow 0.2s;
+}
+
+.picker-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.picker-item:hover,
+.picker-item:focus {
+  border: 3px solid #2196F3;
+  box-shadow: 0 0 8px rgba(33, 150, 243, 0.5);
+  outline: none;
+}
+
+.picker-item.selected {
+  border: 3px solid white;
+}
+
+.color-grid {
+  max-width: 400px;
+}
+
+.color-item {
+  width: 60px;
+  height: 60px;
+}
+
+/* ========== LAUNCHER ========== */
+.launcher-screen {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 2vh 3vw;
+}
+
+.launcher-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2vh;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 1.5vw;
+}
+
+.menu-btn {
+  background: rgba(255, 255, 255, 0.1);
+  border: none;
+  color: white;
+  font-size: 2.5vh;
+  width: 5vh;
+  height: 5vh;
+  border-radius: 0.5vh;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.menu-btn:hover, .menu-btn:focus {
+  background: rgba(255, 255, 255, 0.2);
+  outline: none;
+}
+
+.profile-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.8vw;
+  cursor: pointer;
+  padding: 0.8vh 1.2vw;
+  border-radius: 0.5vh;
+  transition: background 0.2s;
+}
+
+.profile-badge:hover, .profile-badge:focus {
+  background: rgba(255, 255, 255, 0.1);
+  outline: none;
+}
+
+.profile-badge .profile-avatar {
+  width: 4vh;
+  height: 4vh;
+  font-size: 1.8vh;
+}
+
+.profile-badge .profile-name {
+  font-size: 1.8vh;
+}
+
+.header-actions {
+  display: flex;
+  gap: 1vw;
+}
+
+.header-btn {
+  background: rgba(255, 255, 255, 0.1);
+  border: none;
+  color: white;
+  padding: 1vh 2vw;
+  border-radius: 0.5vh;
+  cursor: pointer;
+  font-size: 1.8vh;
+  transition: background 0.2s;
+}
+
+.header-btn:hover, .header-btn:focus {
+  background: rgba(255, 255, 255, 0.2);
+  outline: none;
+}
+
+/* ========== APP GRID ========== */
+.app-grid, .library-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15vw, 1fr));
+  gap: 2vh 2vw;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 3vh 4vw;
+  flex: 1;
+  align-content: center;
+}
+
+.app-tile, .library-tile {
+  aspect-ratio: 16 / 7;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s, border 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+  box-shadow: 0 5px 10px rgba(0, 0, 0, 0.3);
+}
+
+.app-tile:hover, .app-tile:focus,
+.library-tile:hover, .library-tile:focus {
+  transform: scale(1.1);
+  outline: none;
+  border: none;
+  z-index: 1;
+  /* Concentric rings: dark inner, white middle, colored glow outer */
+  box-shadow:
+    0 0 0 3px rgba(0, 0, 0, 0.7),
+    0 0 0 6px white,
+    0 0 30px 5px var(--tile-glow-color, rgba(255, 255, 255, 0.6));
+}
+
+.app-tile img, .library-tile img {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  max-width: 85%;
+  max-height: 70%;
+  object-fit: contain;
+}
+
+.app-tile .app-name, .library-tile .app-name {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 1vh;
+  background: linear-gradient(transparent, rgba(0,0,0,0.8));
+  font-size: 1.6vh;
+  text-align: center;
+}
+
+/* ========== EDIT MODE ========== */
+.app-tile.edit-mode {
+  cursor: default;
+}
+
+.app-tile.edit-mode:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+.edit-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1vw;
+}
+
+.edit-btn {
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: white;
+  width: 4vh;
+  height: 4vh;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 1.5vh;
+  transition: background 0.2s, transform 0.2s;
+}
+
+.edit-btn:hover {
+  background: rgba(255, 255, 255, 0.4);
+  transform: scale(1.1);
+}
+
+.edit-btn.delete-btn {
+  background: rgba(220, 53, 69, 0.8);
+}
+
+.edit-btn.delete-btn:hover {
+  background: rgba(220, 53, 69, 1);
+}
+
+/* ========== SIDE MENU ========== */
+.side-menu {
+  position: fixed;
+  top: 0;
+  left: -30vw;
+  width: 30vw;
+  max-width: 400px;
+  height: 100%;
+  background: #16213E;
+  box-shadow: 2px 0 10px rgba(0, 0, 0, 0.5);
+  transition: left 0.3s ease;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+}
+
+.side-menu.open {
+  left: 0;
+}
+
+.menu-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.3s, visibility 0.3s;
+  z-index: 999;
+}
+
+.menu-overlay.open {
+  opacity: 1;
+  visibility: visible;
+}
+
+.menu-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2vh 2vw;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.menu-header h2 {
+  font-size: 2.5vh;
+  font-weight: 400;
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  color: white;
+  font-size: 2.5vh;
+  cursor: pointer;
+  padding: 0.5vh;
+}
+
+.close-btn:hover {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.menu-content {
+  padding: 2vh 2vw;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.menu-section {
+  margin-bottom: 2.5vh;
+}
+
+.menu-section h3 {
+  font-size: 1.6vh;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.6);
+  margin-bottom: 1vh;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.menu-select {
+  width: 100%;
+  padding: 1vh 1.5vw;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 0.5vh;
+  color: white;
+  font-size: 1.8vh;
+  cursor: pointer;
+}
+
+.menu-select:focus {
+  outline: none;
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.menu-select option {
+  background: #16213E;
+  color: white;
+}
+
+.version-info {
+  font-size: 1.6vh;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.menu-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 2vh 0;
+}
+
+.menu-item {
+  display: block;
+  width: 100%;
+  padding: 1.5vh 1.5vw;
+  background: none;
+  border: none;
+  color: white;
+  font-size: 1.8vh;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 0.5vh;
+  transition: background 0.2s;
+}
+
+.menu-item:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.menu-item.danger {
+  color: #dc3545;
+}
+
+.menu-item.danger:hover {
+  background: rgba(220, 53, 69, 0.2);
+}
+
+/* ========== LIBRARY SCREEN ========== */
+.library-screen {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 2vh 3vw;
+}
+
+.library-header {
+  display: flex;
+  align-items: center;
+  gap: 2vw;
+  margin-bottom: 2vh;
+}
+
+.back-btn {
+  background: rgba(255, 255, 255, 0.1);
+  border: none;
+  color: white;
+  padding: 1vh 2vw;
+  border-radius: 0.5vh;
+  cursor: pointer;
+  font-size: 1.8vh;
+  transition: background 0.2s;
+}
+
+.back-btn:hover, .back-btn:focus {
+  background: rgba(255, 255, 255, 0.2);
+  outline: none;
+}
+
+.library-header h1 {
+  font-size: 3vh;
+  font-weight: 400;
+}
+
+.no-services {
+  grid-column: 1 / -1;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 2vh;
+  padding: 5vh;
+}
+
+/* ========== EMPTY STATE ========== */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 2vh;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.empty-state h2 {
+  font-size: 3vh;
+  font-weight: 300;
+}
+
+.empty-state p {
+  font-size: 2vh;
+}
+
+/* ========== LOADING ========== */
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-size: 2vh;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+/* ========== SCROLLBAR ========== */
+::-webkit-scrollbar {
+  width: 0.8vh;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 0.4vh;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 0.4vh;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* ========== KEYBOARD MODE ========== */
+/* When using keyboard navigation, disable hover effects to prevent dual highlights */
+body.keyboard-mode .app-tile:hover:not(:focus),
+body.keyboard-mode .library-tile:hover:not(:focus),
+body.keyboard-mode .profile-tile:hover:not(:focus) {
+  transform: none !important;
+  box-shadow: 0 5px 10px rgba(0, 0, 0, 0.3) !important;
+  border: none !important;
+}
+
+body.keyboard-mode .profile-tile:hover:not(:focus) .profile-avatar {
+  border: 2px solid rgba(255, 255, 255, 0.38) !important;
+  box-shadow: none !important;
+}
+
+body.keyboard-mode .app-tile:hover:not(:focus) .app-edit-btn,
+body.keyboard-mode .profile-tile:hover:not(:focus) .profile-edit-btn {
+  display: none !important;
+}
+
+body.keyboard-mode .menu-btn:hover:not(:focus),
+body.keyboard-mode .back-btn:hover:not(:focus),
+body.keyboard-mode .menu-item:hover:not(:focus) {
+  background: transparent !important;
+}
+
+/* ========== POPUP MENU ========== */
+.popup-menu {
+  position: fixed;
+  top: 8vh;
+  left: 2vw;
+  background: #2A2A4E;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  min-width: 200px;
+  z-index: 1001;
+  opacity: 0;
+  visibility: hidden;
+  transform: scale(0.95);
+  transition: opacity 0.2s, visibility 0.2s, transform 0.2s;
+}
+
+.popup-menu.open {
+  opacity: 1;
+  visibility: visible;
+  transform: scale(1);
+}
+
+.popup-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  color: white;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.popup-item:first-child {
+  border-radius: 8px 8px 0 0;
+}
+
+.popup-item:last-child {
+  border-radius: 0 0 8px 8px;
+}
+
+.popup-item:hover,
+.popup-item:focus {
+  background: rgba(255, 255, 255, 0.1);
+  outline: none;
+}
+
+.popup-icon {
+  font-size: 18px;
+  width: 24px;
+  text-align: center;
+}
+
+.popup-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 4px 0;
+}
+
+.popup-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1000;
+  opacity: 0;
+  visibility: hidden;
+}
+
+.popup-overlay.open {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* ========== ADD TILE ========== */
+.add-tile {
+  background: rgba(255, 255, 255, 0.1) !important;
+  border: 2px dashed rgba(255, 255, 255, 0.3);
+  flex-direction: column;
+}
+
+.add-tile:hover, .add-tile:focus {
+  background: rgba(255, 255, 255, 0.15) !important;
+  border: 2px dashed rgba(255, 255, 255, 0.5);
+  box-shadow: 0 0 20px 5px rgba(255, 255, 255, 0.3);
+}
+
+.add-icon {
+  font-size: 48px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+/* ========== APP EDIT BUTTON ========== */
+.app-edit-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(0, 0, 0, 0.5);
+  border: none;
+  border-radius: 50%;
+  color: white;
+  width: 32px;
+  height: 32px;
+  font-size: 16px;
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.app-tile:hover .app-edit-btn,
+.app-tile:focus .app-edit-btn {
+  display: flex;
+}
+
+.app-edit-btn:hover {
+  background: rgba(0, 0, 0, 0.7);
+}
+
+/* ========== HEADER LOGO ========== */
+.header-logo {
+  height: 12vh;
+  max-height: 150px;
+}
+
+.header-right {
+  width: 5vh;
+}
+
+/* ========== HELP DIALOG ========== */
+.help-list {
+  margin-bottom: 24px;
+}
+
+.help-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  color: white;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.help-row:last-child {
+  border-bottom: none;
+}
+
+.help-key {
+  background: rgba(255, 255, 255, 0.1);
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 14px;
+}
+
+/* ========== DIALOG SELECT ========== */
+.dialog-select {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  padding: 12px 16px;
+  font-size: 16px;
+  cursor: pointer;
+  margin-top: 8px;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.dialog-select:focus {
+  outline: none;
+  border-color: #2196F3;
+}
+
+.dialog-select option {
+  background: #2A2A4E;
+  color: white;
+}
+
+.dialog-field label {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 14px;
+}
+
+/* ========== MOVE MODE ========== */
+.app-tile.move-mode,
+.profile-tile.move-mode .profile-avatar {
+  border: 4px solid #FF9800 !important;
+  animation: move-pulse 1s ease-in-out infinite;
+}
+
+@keyframes move-pulse {
+  0%, 100% { box-shadow: 0 0 10px 2px rgba(255, 152, 0, 0.5); }
+  50% { box-shadow: 0 0 20px 5px rgba(255, 152, 0, 0.8); }
+}
+
+/* ========== APP EDIT DIALOG ========== */
+.app-dialog {
+  width: 450px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.dialog-textarea {
+  min-height: 80px;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.color-preview-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.color-preview {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+}
+
+.checkbox-field label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  color: white;
+}
+
+.checkbox-field input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
+
+/* ========== SETTINGS DIALOG ========== */
+.settings-dialog {
+  width: 450px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.dialog-section {
+  margin-bottom: 24px;
+}
+
+.dialog-section-title {
+  color: white;
+  font-weight: bold;
+  margin-bottom: 12px;
+}
+
+.radio-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  color: white;
+  cursor: pointer;
+}
+
+.radio-option input[type="radio"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: #2196F3;
+}
+
+.dialog-note {
+  color: rgba(255, 255, 255, 0.5);
+  font-style: italic;
+}
+
+/* ========== CONFIRM DIALOG ========== */
+.confirm-dialog {
+  width: 350px;
+  text-align: center;
+}
+
+.confirm-message {
+  color: white;
+  font-size: 16px;
+  margin: 20px 0;
+}
+
+.danger-btn {
+  background: #d32f2f;
+}
+
+.danger-btn:hover {
+  background: #b71c1c;
+}
+
+.confirm-btn:focus {
+  outline: 2px solid white;
+  outline-offset: 2px;
+}
+
+.danger-btn:focus {
+  outline: 2px solid #ff5252;
+  outline-offset: 2px;
+}

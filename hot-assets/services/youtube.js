@@ -246,6 +246,10 @@
             return;
         }
 
+        // Find current element's type
+        const currentInfo = elements.find(e => e.el === selectedElement);
+        const currentType = currentInfo?.type;
+
         const currentRect = selectedElement.getBoundingClientRect();
         const cx = currentRect.left + currentRect.width / 2;
         const cy = currentRect.top + currentRect.height / 2;
@@ -253,8 +257,13 @@
         let best = null;
         let bestDist = Infinity;
 
-        for (const { el, rect } of elements) {
+        for (const { el, rect, type } of elements) {
             if (el === selectedElement) continue;
+
+            // For up/down, stay within same type (video grid, guide menu, etc)
+            const isVertical = direction === 'up' || direction === 'down';
+            if (isVertical && currentType && type !== currentType) continue;
+
             const ex = rect.left + rect.width / 2;
             const ey = rect.top + rect.height / 2;
 
@@ -275,7 +284,7 @@
             }
 
             if (valid) {
-                const dist = (direction === 'up' || direction === 'down')
+                const dist = isVertical
                     ? Math.abs(ey - cy) + Math.abs(ex - cx) * 0.3
                     : Math.abs(ex - cx) + Math.abs(ey - cy) * 3;
                 if (dist < bestDist) {

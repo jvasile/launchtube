@@ -95,10 +95,15 @@ func (s *Server) SetOnShutdown(fn func()) {
 
 func (s *Server) GetAppsForProfile(profileID string) []AppConfig {
 	if profileID == "" {
-		s.appsMu.RLock()
-		apps := s.apps
-		s.appsMu.RUnlock()
-		return apps
+		// Use active profile if no profile specified
+		if s.activeProfile != "" {
+			profileID = s.activeProfile
+		} else {
+			s.appsMu.RLock()
+			apps := s.apps
+			s.appsMu.RUnlock()
+			return apps
+		}
 	}
 
 	s.appsMu.RLock()

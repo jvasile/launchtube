@@ -309,6 +309,11 @@
         cancelBtn.addEventListener('click', hideExitConfirmation);
         exitBtn.addEventListener('click', doExit);
 
+        confirmationElement._buttons = [cancelBtn, exitBtn];
+        confirmationElement._focusIndex = 1;
+        exitBtn.focus();
+        updateButtonFocus();
+
         // Click outside dialog to dismiss
         confirmationElement.addEventListener('click', (e) => {
             if (e.target === confirmationElement) {
@@ -320,6 +325,17 @@
         document.addEventListener('keydown', handleConfirmKeydown, true);
     }
 
+    function updateButtonFocus() {
+        if (!confirmationElement) return;
+        const btns = confirmationElement._buttons;
+        const idx = confirmationElement._focusIndex;
+        btns.forEach((btn, i) => {
+            btn.style.outline = i === idx ? '2px solid #fff' : 'none';
+            btn.style.outlineOffset = '2px';
+        });
+        btns[idx].focus();
+    }
+
     function hideExitConfirmation() {
         document.removeEventListener('keydown', handleConfirmKeydown, true);
         if (confirmationElement) {
@@ -329,11 +345,15 @@
     }
 
     function handleConfirmKeydown(event) {
-        if (event.key === 'Escape' || event.key === 'Enter') {
-            // Both Escape and Enter confirm exit
-            event.preventDefault();
-            event.stopPropagation();
-            doExit();
+        event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation();
+        if (event.key === 'Escape') {
+            hideExitConfirmation();
+        } else if (event.key === 'Enter') {
+            if (confirmationElement._focusIndex === 0) hideExitConfirmation();
+            else doExit();
+        } else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+            confirmationElement._focusIndex = confirmationElement._focusIndex === 0 ? 1 : 0;
+            updateButtonFocus();
         }
     }
 

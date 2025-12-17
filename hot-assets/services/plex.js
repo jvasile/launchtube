@@ -69,11 +69,26 @@
         box.appendChild(title);
         box.appendChild(buttons);
         confirmationElement.appendChild(box);
+        confirmationElement._buttons = [cancelBtn, exitBtn];
+        confirmationElement._focusIndex = 1;
         document.body.appendChild(confirmationElement);
         confirmationElement.addEventListener('click', (e) => {
             if (e.target === confirmationElement) hideExitConfirmation();
         });
         document.addEventListener('keydown', handleConfirmKeydown, true);
+        exitBtn.focus();
+        updateButtonFocus();
+    }
+
+    function updateButtonFocus() {
+        if (!confirmationElement) return;
+        const btns = confirmationElement._buttons;
+        const idx = confirmationElement._focusIndex;
+        btns.forEach((btn, i) => {
+            btn.style.outline = i === idx ? '2px solid #fff' : 'none';
+            btn.style.outlineOffset = '2px';
+        });
+        btns[idx].focus();
     }
 
     function hideExitConfirmation() {
@@ -82,9 +97,15 @@
     }
 
     function handleConfirmKeydown(event) {
-        if (event.key === 'Escape' || event.key === 'Enter') {
-            event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation();
-            doExit();
+        event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation();
+        if (event.key === 'Escape') {
+            hideExitConfirmation();
+        } else if (event.key === 'Enter') {
+            if (confirmationElement._focusIndex === 0) hideExitConfirmation();
+            else doExit();
+        } else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+            confirmationElement._focusIndex = confirmationElement._focusIndex === 0 ? 1 : 0;
+            updateButtonFocus();
         }
     }
 

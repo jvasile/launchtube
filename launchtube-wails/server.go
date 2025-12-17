@@ -218,6 +218,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/1/detect-extensions", s.handleDetectExtensions)
 	mux.HandleFunc("/api/1/userscript", s.handleUserscript)
 	mux.HandleFunc("/api/1/log", s.handleLog)
+	mux.HandleFunc("/api/1/youtube/fullscreen", s.handleYouTubeFullscreen)
 	mux.HandleFunc("/api/1/profile", s.handleProfile)
 	mux.HandleFunc("/launchtube-loader.user.js", s.handleUserscript)
 	mux.HandleFunc("/setup", s.handleSetup)

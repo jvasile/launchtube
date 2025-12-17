@@ -59,6 +59,26 @@
         [page-subtype="subscriptions"] ytd-rich-item-renderer:has([href*="/shorts/"]) {
             display: none !important;
         }
+        /* Hide Shorts from left menu */
+        ytd-guide-entry-renderer:has([title="Shorts"]),
+        ytd-mini-guide-entry-renderer:has([title="Shorts"]) {
+            display: none !important;
+        }
+        /* Hide sponsored/promoted content */
+        ytd-ad-slot-renderer,
+        ytd-promoted-sparkles-web-renderer,
+        ytd-promoted-video-renderer,
+        ytd-display-ad-renderer,
+        ytd-in-feed-ad-layout-renderer,
+        ytd-banner-promo-renderer,
+        ytd-statement-banner-renderer,
+        ytd-brand-video-singleton-renderer,
+        #masthead-ad,
+        #player-ads,
+        .ytp-ad-module,
+        .video-ads {
+            display: none !important;
+        }
     `;
     document.head.appendChild(navStyle);
 
@@ -131,9 +151,20 @@
 
     function enableTheaterModeIfNeeded() {
         const player = document.querySelector('#movie_player');
+        serverLog(`enableTheaterModeIfNeeded: player=${!!player}, fullscreenFlag=${window._launchtubeFullscreenPlayer}`);
         if (!player) return;
-        if (player.classList.contains('ytp-fullscreen')) return; // Already fullscreen
-        if (player.classList.contains('ytp-big-mode')) return; // Already theater mode
+        if (window._launchtubeFullscreenPlayer) {
+            serverLog('Skipping theater mode - fullscreen pending');
+            return;
+        }
+        if (player.classList.contains('ytp-fullscreen')) {
+            serverLog('Skipping theater mode - already fullscreen');
+            return;
+        }
+        if (player.classList.contains('ytp-big-mode')) {
+            serverLog('Skipping theater mode - already theater');
+            return;
+        }
 
         const theaterBtn = document.querySelector('.ytp-size-button');
         if (theaterBtn) {
@@ -307,12 +338,9 @@
         const isVideo = selectedElement.matches('ytd-rich-item-renderer, ytd-video-renderer, ytd-compact-video-renderer, ytd-grid-video-renderer, ytd-playlist-video-renderer');
         serverLog(`Activating: isVideo=${isVideo}`);
 
-        // Go fullscreen immediately if activating a video
-        if (isVideo && !document.fullscreenElement) {
-            serverLog('Requesting fullscreen before navigation');
-            document.documentElement.requestFullscreen()
-                .then(() => serverLog('Fullscreen success'))
-                .catch(err => serverLog(`Fullscreen failed: ${err.message}`));
+        // For video cards, set flag to request fullscreen via CDP after navigation
+        if (isVideo) {
+            window._launchtubeFullscreenPending = true;
         }
 
         // Find the clickable link or the element itself
@@ -391,26 +419,33 @@
             }
             setTimeout(autoSelectFirst, 500);
 
-            // Fullscreen YouTube player when navigating to video page
+            // On video page, request fullscreen via CDP if pending
             if (location.pathname === '/watch') {
-                setTimeout(() => {
-                    const player = document.querySelector('#movie_player');
-                    if (!player) return;
-
-                    // If fullscreen was requested, click YouTube's fullscreen button
-                    if (window._launchtubeFullscreenPlayer) {
-                        window._launchtubeFullscreenPlayer = false;
-                        const fullscreenBtn = document.querySelector('.ytp-fullscreen-button');
-                        if (fullscreenBtn && !player.classList.contains('ytp-fullscreen')) {
-                            serverLog('Clicking YouTube fullscreen button');
-                            fullscreenBtn.click();
+                serverLog(`Navigate finish: path=/watch, fullscreenPending=${!!window._launchtubeFullscreenPending}`);
+                if (window._launchtubeFullscreenPending) {
+                    window._launchtubeFullscreenPending = false;
+                    // Wait for video to be ready, then request fullscreen via CDP
+                    const waitAndFullscreen = () => {
+                        const video = document.querySelector('video');
+                        if (!video || video.readyState < 3) {
+                            serverLog('Waiting for video to be ready...');
+                            setTimeout(waitAndFullscreen, 500);
                             return;
                         }
-                    }
-
-                    // Otherwise enable theater mode if not fullscreen
-                    enableTheaterModeIfNeeded();
-                }, 1000);
+                        serverLog('Video ready, requesting CDP fullscreen');
+                        fetch(`${LAUNCH_TUBE_URL}/api/1/youtube/fullscreen`, { method: 'POST' })
+                            .then(r => r.json())
+                            .then(data => {
+                                serverLog(`CDP fullscreen result: ${JSON.stringify(data)}`);
+                            })
+                            .catch(err => {
+                                serverLog(`CDP fullscreen error: ${err.message}`);
+                            });
+                    };
+                    setTimeout(waitAndFullscreen, 1000);
+                } else {
+                    setTimeout(enableTheaterModeIfNeeded, 1000);
+                }
             }
         }
     }
@@ -418,14 +453,15 @@
     // === Exit Confirmation ===
     function handleGlobalEscape(event) {
         if (event.key === 'Escape' && !confirmationElement) {
-            // Let video player handle fullscreen exit
-            if (document.fullscreenElement) return;
+            // Let YouTube player handle fullscreen exit if video is in fullscreen
+            const player = document.querySelector('#movie_player');
+            if (player && player.classList.contains('ytp-fullscreen')) return;
 
-            // If on video page and not in fullscreen, go back
+            // If on video page and not in fullscreen, go back to home
             if (location.pathname === '/watch') {
                 event.preventDefault();
                 event.stopPropagation();
-                showExitConfirmation();
+                window.location.href = '/';
                 return;
             }
 
@@ -538,12 +574,12 @@
     function init() {
         serverLog('Initializing YouTube integration');
 
-        // Intercept clicks on video links - set flag to fullscreen player after navigation
+        // Intercept clicks on video links - set flag for CDP fullscreen
         document.addEventListener('click', (e) => {
             const link = e.target.closest('a[href*="/watch"]');
             if (link) {
-                serverLog('Video link click - will fullscreen player');
-                window._launchtubeFullscreenPlayer = true;
+                serverLog('Video link click - will request CDP fullscreen');
+                window._launchtubeFullscreenPending = true;
             }
         }, true);
 

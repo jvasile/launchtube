@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -14,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chromedp/chromedp"
+	"github.com/gorilla/websocket"
 )
 
 type BrowserInfo struct {
@@ -279,61 +278,133 @@ func (e *BrowserError) Error() string {
 	return e.Message
 }
 
+// findCDPTarget finds a browser tab matching urlPattern and returns its ID
+func (bm *BrowserManager) findCDPTarget(urlPattern string) (string, error) {
+	resp, err := http.Get("http://localhost:9222/json")
+	if err != nil {
+		return "", fmt.Errorf("failed to get CDP targets: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var targets []struct {
+		ID   string `json:"id"`
+		Type string `json:"type"`
+		URL  string `json:"url"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&targets); err != nil {
+		return "", fmt.Errorf("failed to decode CDP targets: %w", err)
+	}
+
+	for _, t := range targets {
+		Log("CDP target: type=%s id=%s url=%s", t.Type, t.ID, t.URL)
+		if t.Type == "page" && strings.Contains(t.URL, urlPattern) {
+			Log("CDP matched target id=%s url=%s", t.ID, t.URL)
+			return t.ID, nil
+		}
+	}
+
+	return "", fmt.Errorf("no tab found matching %s", urlPattern)
+}
+
+// cdpEvaluate evaluates JavaScript in a specific target via CDP websocket
+func (bm *BrowserManager) cdpEvaluate(targetID, expression string) (interface{}, error) {
+	wsURL := fmt.Sprintf("ws://localhost:9222/devtools/page/%s", targetID)
+	Log("CDP connecting to: %s", wsURL)
+
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("websocket dial failed: %w", err)
+	}
+	defer conn.Close()
+
+	// Send Runtime.evaluate command
+	cmd := map[string]interface{}{
+		"id":     1,
+		"method": "Runtime.evaluate",
+		"params": map[string]interface{}{
+			"expression": expression,
+		},
+	}
+
+	if err := conn.WriteJSON(cmd); err != nil {
+		return nil, fmt.Errorf("write command failed: %w", err)
+	}
+
+	// Read response
+	var response struct {
+		ID     int `json:"id"`
+		Result struct {
+			Result struct {
+				Value interface{} `json:"value"`
+			} `json:"result"`
+		} `json:"result"`
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+
+	if err := conn.ReadJSON(&response); err != nil {
+		return nil, fmt.Errorf("read response failed: %w", err)
+	}
+
+	if response.Error.Message != "" {
+		return nil, fmt.Errorf("CDP error: %s", response.Error.Message)
+	}
+
+	Log("CDP evaluate result: %v", response.Result.Result.Value)
+	return response.Result.Result.Value, nil
+}
+
 // SendFocusToPage connects to the browser via CDP and focuses the page content
 func (bm *BrowserManager) SendFocusToPage() error {
 	Log("CDP SendFocusToPage: waiting 5 seconds for page to load...")
 	time.Sleep(5 * time.Second)
 
-	Log("CDP SendFocusToPage: fetching targets from localhost:9222...")
-
-	// Get targets via HTTP
-	resp, err := http.Get("http://localhost:9222/json")
+	targetID, err := bm.findCDPTarget("youtube.com")
 	if err != nil {
-		Log("CDP SendFocusToPage: failed to get targets: %v", err)
-		return err
-	}
-	defer resp.Body.Close()
-
-	var targets []struct {
-		ID                   string `json:"id"`
-		Type                 string `json:"type"`
-		URL                  string `json:"url"`
-		WebSocketDebuggerUrl string `json:"webSocketDebuggerUrl"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&targets); err != nil {
-		Log("CDP SendFocusToPage: failed to decode targets: %v", err)
+		Log("CDP SendFocusToPage: %v", err)
 		return err
 	}
 
-	var wsURL string
-	for _, t := range targets {
-		Log("CDP SendFocusToPage: target: %s %s", t.Type, t.URL)
-		if t.Type == "page" && strings.Contains(t.URL, "youtube.com") {
-			wsURL = t.WebSocketDebuggerUrl
-			break
-		}
-	}
-
-	if wsURL == "" {
-		Log("CDP SendFocusToPage: no YouTube tab found")
-		return fmt.Errorf("no YouTube tab found")
-	}
-
-	Log("CDP SendFocusToPage: found YouTube tab, ws: %s", wsURL)
-
-	// Connect directly to the target's WebSocket
-	allocCtx, _ := chromedp.NewRemoteAllocator(context.Background(), wsURL)
-	ctx, _ := chromedp.NewContext(allocCtx)
-	ctx, _ = context.WithTimeout(ctx, 10*time.Second)
-
-	// Click on the page to focus it
 	Log("CDP SendFocusToPage: clicking page...")
-	err = chromedp.Run(ctx, chromedp.Evaluate(`document.body.click()`, nil))
+	_, err = bm.cdpEvaluate(targetID, `document.body.click()`)
 	if err != nil {
 		Log("CDP SendFocusToPage click failed: %v", err)
 		return err
 	}
 
 	Log("CDP SendFocusToPage succeeded")
+	return nil
+}
+
+// SendKeyToPage sends a key press to a tab matching urlPattern via CDP
+// If focusSelector is provided, focuses that element first
+func (bm *BrowserManager) SendKeyToPage(urlPattern, key, focusSelector string) error {
+	// TODO: Implement with raw websocket CDP - chromedp closes browser on context cancel
+	Log("CDP SendKeyToPage: not implemented (chromedp causes browser close)")
+	return nil
+}
+
+// ClickElement clicks an element matching selector in a tab matching urlPattern via CDP
+func (bm *BrowserManager) ClickElement(urlPattern, selector string) error {
+	// TODO: Implement with raw websocket CDP - chromedp closes browser on context cancel
+	Log("CDP ClickElement: not implemented (chromedp causes browser close)")
+	return nil
+}
+
+// EvalJS evaluates JavaScript in a tab matching urlPattern via CDP
+func (bm *BrowserManager) EvalJS(urlPattern, script string) error {
+	targetID, err := bm.findCDPTarget(urlPattern)
+	if err != nil {
+		Log("CDP EvalJS: %v", err)
+		return err
+	}
+
+	_, err = bm.cdpEvaluate(targetID, script)
+	if err != nil {
+		Log("CDP EvalJS failed: %v", err)
+		return err
+	}
+
 	return nil
 }

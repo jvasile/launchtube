@@ -793,8 +793,8 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 }
 
 // LaunchBrowser launches a browser with the given URL
-func (s *Server) LaunchBrowser(browserName, url, profileID string) error {
-	Log("Launching browser: %s url=%s profile=%s useCDP=%v", browserName, url, profileID, s.useCDP)
+func (s *Server) LaunchBrowser(browserName, url, profileID string, focusAlert bool) error {
+	Log("Launching browser: %s url=%s profile=%s useCDP=%v focusAlert=%v", browserName, url, profileID, s.useCDP, focusAlert)
 	s.activeProfile = profileID
 
 	if s.useCDP {
@@ -810,7 +810,17 @@ func (s *Server) LaunchBrowser(browserName, url, profileID string) error {
 		return s.cdpBrowser.Launch(url, profileID)
 	}
 
-	return s.browserMgr.Launch(browserName, url, profileID, s.port)
+	err := s.browserMgr.Launch(browserName, url, profileID, s.port)
+	if err != nil {
+		return err
+	}
+
+	// If focusAlert is enabled, use CDP to focus the page content
+	if focusAlert {
+		go s.browserMgr.SendFocusToPage()
+	}
+
+	return nil
 }
 
 // LaunchApp launches a native application

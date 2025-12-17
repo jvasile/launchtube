@@ -1,7 +1,10 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +12,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
+
+	"github.com/chromedp/chromedp"
 )
 
 type BrowserInfo struct {
@@ -148,6 +154,7 @@ func (bm *BrowserManager) Launch(browserName, url, profileID string, serverPort 
 			"--force-dark-mode",
 			"--enable-features=AutomaticFullscreenContentSetting",
 			"--start-fullscreen",
+			"--remote-debugging-port=9222",
 		)
 
 		// Create policy file for automatic fullscreen permission
@@ -270,4 +277,63 @@ type BrowserError struct {
 
 func (e *BrowserError) Error() string {
 	return e.Message
+}
+
+// SendFocusToPage connects to the browser via CDP and focuses the page content
+func (bm *BrowserManager) SendFocusToPage() error {
+	Log("CDP SendFocusToPage: waiting 5 seconds for page to load...")
+	time.Sleep(5 * time.Second)
+
+	Log("CDP SendFocusToPage: fetching targets from localhost:9222...")
+
+	// Get targets via HTTP
+	resp, err := http.Get("http://localhost:9222/json")
+	if err != nil {
+		Log("CDP SendFocusToPage: failed to get targets: %v", err)
+		return err
+	}
+	defer resp.Body.Close()
+
+	var targets []struct {
+		ID                   string `json:"id"`
+		Type                 string `json:"type"`
+		URL                  string `json:"url"`
+		WebSocketDebuggerUrl string `json:"webSocketDebuggerUrl"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&targets); err != nil {
+		Log("CDP SendFocusToPage: failed to decode targets: %v", err)
+		return err
+	}
+
+	var wsURL string
+	for _, t := range targets {
+		Log("CDP SendFocusToPage: target: %s %s", t.Type, t.URL)
+		if t.Type == "page" && strings.Contains(t.URL, "youtube.com") {
+			wsURL = t.WebSocketDebuggerUrl
+			break
+		}
+	}
+
+	if wsURL == "" {
+		Log("CDP SendFocusToPage: no YouTube tab found")
+		return fmt.Errorf("no YouTube tab found")
+	}
+
+	Log("CDP SendFocusToPage: found YouTube tab, ws: %s", wsURL)
+
+	// Connect directly to the target's WebSocket
+	allocCtx, _ := chromedp.NewRemoteAllocator(context.Background(), wsURL)
+	ctx, _ := chromedp.NewContext(allocCtx)
+	ctx, _ = context.WithTimeout(ctx, 10*time.Second)
+
+	// Click on the page to focus it
+	Log("CDP SendFocusToPage: clicking page...")
+	err = chromedp.Run(ctx, chromedp.Evaluate(`document.body.click()`, nil))
+	if err != nil {
+		Log("CDP SendFocusToPage click failed: %v", err)
+		return err
+	}
+
+	Log("CDP SendFocusToPage succeeded")
+	return nil
 }

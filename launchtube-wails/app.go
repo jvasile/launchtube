@@ -143,7 +143,7 @@ func (a *App) LaunchApp(app AppConfig, profileID string, browserName string) err
 	if app.Type == 0 && app.URL != "" {
 		// Website - launch browser and hide window
 		runtime.WindowHide(a.ctx)
-		err := a.server.LaunchBrowser(browserName, app.URL, profileID)
+		err := a.server.LaunchBrowser(browserName, app.URL, profileID, app.FocusAlert)
 		if err != nil {
 			runtime.WindowShow(a.ctx)
 		}

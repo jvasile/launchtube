@@ -370,6 +370,7 @@ func (a *App) SetMpvOptions(options string) {
 	a.server.player.SetMpvOptions(options)
 }
 
+
 // GetServiceLibrary returns available streaming services
 func (a *App) GetServiceLibrary() []ServiceTemplate {
 	servicesDir := filepath.Join(a.server.assetDir, "services")

@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -62,7 +63,7 @@ func NewServer() *Server {
 	// Extension mode is default (CDP triggers bot detection on YouTube etc)
 	useCDP := os.Getenv("LAUNCHTUBE_USE_CDP") == "1"
 
-	player := NewPlayer()
+	player := NewPlayer(dataDir)
 	browserMgr := NewBrowserManager(assetDir, dataDir)
 
 	s := &Server{
@@ -226,6 +227,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/1/detect-extensions", s.handleDetectExtensions)
 	mux.HandleFunc("/api/1/userscript", s.handleUserscript)
 	mux.HandleFunc("/api/1/log", s.handleLog)
+	mux.HandleFunc("/api/1/cookies", s.handleCookies)
 	mux.HandleFunc("/api/1/youtube/fullscreen", s.handleYouTubeFullscreen)
 	mux.HandleFunc("/api/1/profile", s.handleProfile)
 	mux.HandleFunc("/launchtube-loader.user.js", s.handleUserscript)
@@ -801,6 +803,29 @@ func (s *Server) handleLog(w http.ResponseWriter, r *http.Request) {
 	}
 
 	Log("[JS:%s] %s", req.Level, req.Message)
+
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprintf(w, `{"status":"ok"}`)
+}
+
+func (s *Server) handleCookies(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Failed to read body", http.StatusBadRequest)
+		return
+	}
+
+	cookiesPath := filepath.Join(s.dataDir, "cookies.txt")
+	if err := os.WriteFile(cookiesPath, body, 0600); err != nil {
+		Log("Failed to write cookies: %v", err)
+		http.Error(w, "Failed to write cookies", http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprintf(w, `{"status":"ok"}`)

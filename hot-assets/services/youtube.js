@@ -234,12 +234,17 @@
         ytd-reel-shelf-renderer,
         ytd-rich-section-renderer:has(ytd-rich-shelf-renderer[is-shorts]),
         ytd-rich-shelf-renderer:has([href*="/shorts/"]),
-        [page-subtype="subscriptions"] ytd-rich-item-renderer:has([href*="/shorts/"]) {
+        ytd-rich-item-renderer:has([href*="/shorts/"]),
+        ytd-grid-video-renderer:has([href*="/shorts/"]) {
             display: none !important;
         }
         /* Hide Shorts from left menu */
         ytd-guide-entry-renderer:has([title="Shorts"]),
         ytd-mini-guide-entry-renderer:has([title="Shorts"]) {
+            display: none !important;
+        }
+        /* Hide Shorts tab on channel pages */
+        yt-tab-shape[tab-title="Shorts"] {
             display: none !important;
         }
         /* Hide sponsored/promoted content */
@@ -306,6 +311,30 @@
             elements.push({ el, rect, type: 'guide' });
         });
 
+        // Channel tabs (Videos, Playlists, etc.)
+        document.querySelectorAll('yt-tab-shape, yt-chip-cloud-chip-renderer[chip-style="STYLE_HOME_FILTER"]').forEach(el => {
+            const rect = el.getBoundingClientRect();
+            if (rect.width < 20 || rect.height < 20) return;
+            if (seen.has(el)) return;
+            seen.add(el);
+            elements.push({ el, rect, type: 'tabs' });
+        });
+
+        // Top navigation bar
+        const topnavSelectors = [
+            'ytd-masthead #logo a',              // YouTube logo
+            'ytd-masthead ytd-searchbox',        // Search box
+            'ytd-masthead #voice-search-button', // Voice search
+            'ytd-masthead #buttons > ytd-topbar-menu-button-renderer', // Right-side buttons
+        ];
+        document.querySelectorAll(topnavSelectors.join(',')).forEach(el => {
+            const rect = el.getBoundingClientRect();
+            if (rect.width < 20 || rect.height < 20) return;
+            if (seen.has(el)) return;
+            seen.add(el);
+            elements.push({ el, rect, type: 'topnav' });
+        });
+
         // Sort by position
         elements.sort((a, b) => {
             const rowDiff = a.rect.top - b.rect.top;
@@ -364,8 +393,22 @@
             if (el === selectedElement) continue;
 
             // For up/down, stay within same type (video grid, guide menu, etc)
+            // Exception: allow video/chip <-> tabs <-> topnav transitions
             const isVertical = direction === 'up' || direction === 'down';
-            if (isVertical && currentType && type !== currentType) continue;
+            if (isVertical && currentType && type !== currentType) {
+                const contentTypes = ['video', 'chip'];
+                const allowedTransition =
+                    // video/chip -> tabs (up) or tabs -> video/chip (down)
+                    (direction === 'up' && type === 'tabs' && contentTypes.includes(currentType)) ||
+                    (direction === 'down' && currentType === 'tabs' && contentTypes.includes(type)) ||
+                    // tabs -> topnav (up) or topnav -> tabs (down)
+                    (direction === 'up' && type === 'topnav' && currentType === 'tabs') ||
+                    (direction === 'down' && currentType === 'topnav' && type === 'tabs') ||
+                    // video/chip -> topnav (up) when no tabs, or topnav -> video/chip (down) when no tabs
+                    (direction === 'up' && type === 'topnav' && contentTypes.includes(currentType)) ||
+                    (direction === 'down' && currentType === 'topnav' && contentTypes.includes(type));
+                if (!allowedTransition) continue;
+            }
 
             const ex = rect.left + rect.width / 2;
             const ey = rect.top + rect.height / 2;

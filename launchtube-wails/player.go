@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -30,6 +31,7 @@ type Player struct {
 	playing          bool
 	mpvPath          string
 	mpvOptions       string
+	dataDir          string
 	socketPath       string
 	playlist         []PlaylistItem
 	playlistPos      int
@@ -46,9 +48,10 @@ func (p *Player) SetOnExit(fn func()) {
 	p.mu.Unlock()
 }
 
-func NewPlayer() *Player {
+func NewPlayer(dataDir string) *Player {
 	p := &Player{
 		mpvPath: "mpv",
+		dataDir: dataDir,
 	}
 	p.detectMpv()
 	return p
@@ -71,6 +74,47 @@ func (p *Player) detectMpv() {
 			return
 		}
 	}
+}
+
+func (p *Player) getMpvConfigPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".local", "share", "launchtube", "mpv.conf")
+}
+
+func (p *Player) ensureMpvConfig() string {
+	configPath := p.getMpvConfigPath()
+	if configPath == "" {
+		return ""
+	}
+
+	// Check if file already exists
+	if _, err := os.Stat(configPath); err == nil {
+		return configPath
+	}
+
+	// Create directory if needed
+	dir := filepath.Dir(configPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		Log("ExternalPlayer: Failed to create config dir: %v", err)
+		return ""
+	}
+
+	// Write default config
+	defaultConfig := `# Launchtube mpv key bindings
+# See: https://mpv.io/manual/master/#input-conf
+
+ESC quit
+`
+	if err := os.WriteFile(configPath, []byte(defaultConfig), 0644); err != nil {
+		Log("ExternalPlayer: Failed to write mpv config: %v", err)
+		return ""
+	}
+
+	Log("ExternalPlayer: Created default mpv config at %s", configPath)
+	return configPath
 }
 
 func (p *Player) SetMpvPath(path string) {
@@ -160,6 +204,28 @@ func (p *Player) startMpv(url, title string, startPosition float64) error {
 	args := []string{
 		"--fullscreen",
 		fmt.Sprintf("--input-ipc-server=%s", p.socketPath),
+	}
+
+	// Add custom input config if available
+	if inputConf := p.ensureMpvConfig(); inputConf != "" {
+		args = append(args, fmt.Sprintf("--input-conf=%s", inputConf))
+	}
+
+	// Add YouTube-specific options for yt-dlp streams
+	if isYouTubeURL(url) {
+		// Pass cookies file if it exists
+		cookiesPath := filepath.Join(p.dataDir, "cookies.txt")
+		if _, err := os.Stat(cookiesPath); err == nil {
+			args = append(args, fmt.Sprintf("--ytdl-raw-options=cookies=%s", cookiesPath))
+		}
+		args = append(args,
+			// Cap quality at 1080p to avoid bandwidth issues
+			"--ytdl-format=bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
+			// Increase buffer for smoother playback
+			"--cache=yes",
+			"--demuxer-max-bytes=150M",
+			"--demuxer-max-back-bytes=75M",
+		)
 	}
 
 	if startPosition > 0 {
@@ -513,4 +579,8 @@ func isWSL() bool {
 		return false
 	}
 	return strings.Contains(strings.ToLower(string(data)), "microsoft")
+}
+
+func isYouTubeURL(url string) bool {
+	return strings.Contains(url, "youtube.com") || strings.Contains(url, "youtu.be")
 }

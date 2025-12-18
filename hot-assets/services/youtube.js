@@ -1,14 +1,13 @@
-// Launch Tube: YouTube - TV-style navigation, SponsorBlock, Escape to exit
+// Launch Tube: YouTube - TV-style navigation, external player via mpv
 (function() {
     'use strict';
     const LAUNCH_TUBE_PORT = window.LAUNCH_TUBE_PORT || 8765;
     const LAUNCH_TUBE_URL = `http://localhost:${LAUNCH_TUBE_PORT}`;
-    const SPONSORBLOCK_API = 'https://sponsor.ajay.app/api';
 
     let confirmationElement = null;
-    let currentVideoId = null;
-    let sponsorSegments = [];
-    let lastSkipTime = 0;
+    let modalElement = null;
+    let statusElement = null;
+    let pollInterval = null;
     let selectedElement = null;
     let ignoreMouseUntil = 0;
 
@@ -20,6 +19,185 @@
     }
 
     serverLog('YouTube script loaded');
+
+    // === External Player Modal ===
+    function showModal(message) {
+        if (modalElement) return;
+
+        modalElement = document.createElement('div');
+        modalElement.id = 'launchtube-modal';
+        modalElement.innerHTML = `
+            <style>
+                #launchtube-modal {
+                    position: fixed !important;
+                    top: 0 !important;
+                    left: 0 !important;
+                    right: 0 !important;
+                    bottom: 0 !important;
+                    background: rgba(0, 0, 0, 0.95) !important;
+                    z-index: 2147483647 !important;
+                    display: flex !important;
+                    align-items: center;
+                    justify-content: center;
+                }
+                #launchtube-modal .modal-box {
+                    background: #1a1a1a;
+                    border: 1px solid #333;
+                    border-radius: 8px;
+                    padding: 40px 60px;
+                    text-align: center;
+                    color: #fff;
+                    font-family: system-ui, sans-serif;
+                    max-width: 500px;
+                }
+                #launchtube-modal .modal-title {
+                    font-size: 24px;
+                    margin-bottom: 20px;
+                }
+                #launchtube-modal .modal-status {
+                    font-size: 18px;
+                    color: #aaa;
+                    margin-bottom: 30px;
+                }
+                #launchtube-modal .modal-hint {
+                    font-size: 13px;
+                    color: #666;
+                }
+                #launchtube-modal .spinner {
+                    width: 40px;
+                    height: 40px;
+                    border: 3px solid #333;
+                    border-top-color: #ff0000;
+                    border-radius: 50%;
+                    animation: launchtube-spin 1s linear infinite;
+                    margin: 0 auto 20px;
+                }
+                @keyframes launchtube-spin {
+                    to { transform: rotate(360deg); }
+                }
+            </style>
+            <div class="modal-box">
+                <div class="spinner"></div>
+                <div class="modal-title">Playing in External Player</div>
+                <div class="modal-status">${message}</div>
+                <div class="modal-hint">Press <strong>Escape</strong> to stop playback</div>
+            </div>
+        `;
+        document.body.appendChild(modalElement);
+        statusElement = modalElement.querySelector('.modal-status');
+
+        document.addEventListener('keydown', handleModalKeydown, true);
+        startStatusPolling();
+    }
+
+    function updateModalStatus(message) {
+        if (statusElement) {
+            statusElement.textContent = message;
+        }
+    }
+
+    function hideModal(stopPlayer = true) {
+        if (pollInterval) {
+            clearInterval(pollInterval);
+            pollInterval = null;
+        }
+        document.removeEventListener('keydown', handleModalKeydown, true);
+        if (modalElement) {
+            modalElement.remove();
+            modalElement = null;
+            statusElement = null;
+        }
+        if (stopPlayer) {
+            serverLog('Stopping player...');
+            fetch(`${LAUNCH_TUBE_URL}/api/1/player/stop`, { method: 'POST' })
+                .then(r => serverLog('Stop response: ' + r.status))
+                .catch(e => serverLog('Stop failed: ' + e));
+        }
+    }
+
+    function handleModalKeydown(event) {
+        if (event.key === 'Escape') {
+            serverLog('Escape pressed during playback, stopping player');
+            event.preventDefault();
+            event.stopPropagation();
+            event.stopImmediatePropagation();
+            hideModal(true);
+        }
+    }
+
+    function startStatusPolling() {
+        setTimeout(() => {
+            pollInterval = setInterval(async () => {
+                try {
+                    const response = await fetch(`${LAUNCH_TUBE_URL}/api/1/player/status`);
+                    const status = await response.json();
+
+                    if (!status.playing) {
+                        serverLog('Player stopped, hiding modal');
+                        hideModal(false);
+                    } else {
+                        if (status.position !== undefined && status.duration !== undefined && status.duration > 0) {
+                            const posMin = Math.floor(status.position / 60);
+                            const posSec = Math.floor(status.position % 60);
+                            const durMin = Math.floor(status.duration / 60);
+                            const durSec = Math.floor(status.duration % 60);
+                            updateModalStatus(`${posMin}:${posSec.toString().padStart(2, '0')} / ${durMin}:${durSec.toString().padStart(2, '0')}`);
+                        } else if (status.position !== undefined) {
+                            const mins = Math.floor(status.position / 60);
+                            const secs = Math.floor(status.position % 60);
+                            updateModalStatus(`Playing... ${mins}:${secs.toString().padStart(2, '0')}`);
+                        }
+                    }
+                } catch (err) {
+                    hideModal(false);
+                }
+            }, 1000);
+        }, 2000);
+    }
+
+    // Extract video URL from a video card element
+    function extractVideoUrl(element) {
+        // Look for the thumbnail link or video title link
+        const link = element.querySelector('a#thumbnail, a#video-title-link, a[href*="/watch"]');
+        if (link && link.href) {
+            return link.href;
+        }
+        // Check if element itself is a link
+        if (element.href && element.href.includes('/watch')) {
+            return element.href;
+        }
+        return null;
+    }
+
+    // Extract video title from a video card element
+    function extractVideoTitle(element) {
+        const titleEl = element.querySelector('#video-title, #title, yt-formatted-string#video-title');
+        return titleEl?.textContent?.trim() || 'YouTube Video';
+    }
+
+    // Play video in external player
+    async function playExternal(url, title) {
+        showModal('Loading...');
+
+        try {
+            serverLog(`Playing externally: ${url}`);
+            const response = await fetch(`${LAUNCH_TUBE_URL}/api/1/player/play`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url, title, startPosition: 0 }),
+            });
+
+            if (!response.ok) throw new Error(`Player API error: ${response.status}`);
+            serverLog('Player started');
+            updateModalStatus('Playing...');
+            return true;
+        } catch (e) {
+            serverLog('Failed to play externally: ' + e.message);
+            updateModalStatus('Failed to start player: ' + e.message);
+            setTimeout(() => hideModal(false), 3000);
+            return false;
+        }
+    }
 
     // === Highlight Style ===
     const navStyle = document.createElement('style');
@@ -81,115 +259,6 @@
         }
     `;
     document.head.appendChild(navStyle);
-
-    // === SponsorBlock Integration ===
-    function getVideoId() {
-        const url = new URL(location.href);
-        return url.searchParams.get('v') || url.pathname.split('/').pop();
-    }
-
-    async function fetchSponsorSegments(videoId) {
-        try {
-            const categories = ['sponsor', 'selfpromo', 'interaction', 'intro', 'outro', 'preview', 'music_offtopic'];
-            const url = `${SPONSORBLOCK_API}/skipSegments?videoID=${videoId}&categories=${JSON.stringify(categories)}`;
-            const response = await fetch(url);
-            if (response.ok) {
-                const segments = await response.json();
-                serverLog(`SponsorBlock: Found ${segments.length} segments for ${videoId}`);
-                return segments;
-            } else if (response.status === 404) {
-                return [];
-            }
-        } catch (e) {
-            serverLog(`SponsorBlock: Error: ${e.message}`);
-        }
-        return [];
-    }
-
-    function checkAndSkipSponsors(video) {
-        if (!video || sponsorSegments.length === 0) return;
-        const currentTime = video.currentTime;
-        const now = Date.now();
-        if (now - lastSkipTime < 1000) return;
-
-        for (const seg of sponsorSegments) {
-            const [start, end] = seg.segment;
-            if (currentTime >= start && currentTime < end - 0.5) {
-                serverLog(`SponsorBlock: Skipping ${seg.category}`);
-                video.currentTime = end;
-                lastSkipTime = now;
-                showNotification(`Skipped: ${seg.category}`);
-                break;
-            }
-        }
-    }
-
-    function showNotification(message) {
-        const existing = document.getElementById('launchtube-notification');
-        if (existing) existing.remove();
-
-        const notification = document.createElement('div');
-        notification.id = 'launchtube-notification';
-        notification.textContent = message;
-        Object.assign(notification.style, {
-            position: 'fixed', bottom: '80px', right: '20px',
-            background: 'rgba(0,0,0,0.8)', color: '#0f0', padding: '10px 20px',
-            borderRadius: '4px', fontSize: '14px', zIndex: '2147483647',
-            fontFamily: 'system-ui, sans-serif'
-        });
-        document.body.appendChild(notification);
-        setTimeout(() => notification.remove(), 2000);
-    }
-
-    async function onVideoChange() {
-        const videoId = getVideoId();
-        if (videoId && videoId !== currentVideoId && videoId.length === 11) {
-            currentVideoId = videoId;
-            sponsorSegments = await fetchSponsorSegments(videoId);
-        }
-    }
-
-    function enableTheaterModeIfNeeded() {
-        const player = document.querySelector('#movie_player');
-        serverLog(`enableTheaterModeIfNeeded: player=${!!player}, fullscreenFlag=${window._launchtubeFullscreenPlayer}`);
-        if (!player) return;
-        if (window._launchtubeFullscreenPlayer) {
-            serverLog('Skipping theater mode - fullscreen pending');
-            return;
-        }
-        if (player.classList.contains('ytp-fullscreen')) {
-            serverLog('Skipping theater mode - already fullscreen');
-            return;
-        }
-        if (player.classList.contains('ytp-big-mode')) {
-            serverLog('Skipping theater mode - already theater');
-            return;
-        }
-
-        const theaterBtn = document.querySelector('.ytp-size-button');
-        if (theaterBtn) {
-            serverLog('Enabling theater mode');
-            theaterBtn.click();
-        }
-    }
-
-    function initSponsorBlock() {
-        const video = document.querySelector('video');
-        if (video) {
-            video.addEventListener('timeupdate', () => checkAndSkipSponsors(video));
-            serverLog('SponsorBlock: Attached to video');
-        }
-
-        let lastUrl = location.href;
-        const observer = new MutationObserver(() => {
-            if (location.href !== lastUrl) {
-                lastUrl = location.href;
-                onVideoChange();
-            }
-        });
-        observer.observe(document.body, { childList: true, subtree: true });
-        onVideoChange();
-    }
 
     // === TV-Style Navigation ===
     function getNavigableElements() {
@@ -338,12 +407,18 @@
         const isVideo = selectedElement.matches('ytd-rich-item-renderer, ytd-video-renderer, ytd-compact-video-renderer, ytd-grid-video-renderer, ytd-playlist-video-renderer');
         serverLog(`Activating: isVideo=${isVideo}`);
 
-        // For video cards, set flag to request fullscreen via CDP after navigation
         if (isVideo) {
-            window._launchtubeFullscreenPending = true;
+            // Extract video URL and play externally
+            const url = extractVideoUrl(selectedElement);
+            const title = extractVideoTitle(selectedElement);
+            if (url) {
+                serverLog(`Playing video: ${title} - ${url}`);
+                playExternal(url, title);
+                return;
+            }
         }
 
-        // Find the clickable link or the element itself
+        // For non-video elements (chips, guide menu), click normally
         const link = selectedElement.querySelector('a#thumbnail, a#video-title, a') || selectedElement;
         if (link) {
             serverLog('Clicking link');
@@ -418,54 +493,12 @@
                 selectedElement = null;
             }
             setTimeout(autoSelectFirst, 500);
-
-            // On video page, request fullscreen via CDP if pending
-            if (location.pathname === '/watch') {
-                serverLog(`Navigate finish: path=/watch, fullscreenPending=${!!window._launchtubeFullscreenPending}`);
-                if (window._launchtubeFullscreenPending) {
-                    window._launchtubeFullscreenPending = false;
-                    // Wait for video to be ready, then request fullscreen via CDP
-                    const waitAndFullscreen = () => {
-                        const video = document.querySelector('video');
-                        if (!video || video.readyState < 3) {
-                            serverLog('Waiting for video to be ready...');
-                            setTimeout(waitAndFullscreen, 500);
-                            return;
-                        }
-                        serverLog('Video ready, requesting CDP fullscreen');
-                        fetch(`${LAUNCH_TUBE_URL}/api/1/youtube/fullscreen`, { method: 'POST' })
-                            .then(r => r.json())
-                            .then(data => {
-                                serverLog(`CDP fullscreen result: ${JSON.stringify(data)}`);
-                            })
-                            .catch(err => {
-                                serverLog(`CDP fullscreen error: ${err.message}`);
-                            });
-                    };
-                    setTimeout(waitAndFullscreen, 1000);
-                } else {
-                    setTimeout(enableTheaterModeIfNeeded, 1000);
-                }
-            }
         }
     }
 
     // === Exit Confirmation ===
     function handleGlobalEscape(event) {
-        if (event.key === 'Escape' && !confirmationElement) {
-            // Let YouTube player handle fullscreen exit if video is in fullscreen
-            const player = document.querySelector('#movie_player');
-            if (player && player.classList.contains('ytp-fullscreen')) return;
-
-            // If on video page and not in fullscreen, go back to home
-            if (location.pathname === '/watch') {
-                event.preventDefault();
-                event.stopPropagation();
-                window.location.href = '/';
-                return;
-            }
-
-            // On homepage, show exit confirmation
+        if (event.key === 'Escape' && !confirmationElement && !modalElement) {
             event.preventDefault();
             event.stopPropagation();
             showExitConfirmation();
@@ -572,28 +605,38 @@
 
     // === Initialize ===
     function init() {
-        serverLog('Initializing YouTube integration');
+        serverLog('Initializing YouTube integration (external player mode)');
 
-        // Intercept clicks on video links - set flag for CDP fullscreen
+        // Intercept clicks on video thumbnails and links - play externally
         document.addEventListener('click', (e) => {
+            // Find the video card container
+            const videoCard = e.target.closest('ytd-rich-item-renderer, ytd-video-renderer, ytd-compact-video-renderer, ytd-grid-video-renderer, ytd-playlist-video-renderer');
+            if (videoCard) {
+                const url = extractVideoUrl(videoCard);
+                const title = extractVideoTitle(videoCard);
+                if (url) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    e.stopImmediatePropagation();
+                    serverLog(`Click intercepted: ${title} - ${url}`);
+                    playExternal(url, title);
+                    return;
+                }
+            }
+
+            // Also intercept direct clicks on watch links (e.g., video title text)
             const link = e.target.closest('a[href*="/watch"]');
-            if (link) {
-                serverLog('Video link click - will request CDP fullscreen');
-                window._launchtubeFullscreenPending = true;
+            if (link && link.href) {
+                // Find title from nearby elements
+                const card = link.closest('ytd-rich-item-renderer, ytd-video-renderer, ytd-compact-video-renderer, ytd-grid-video-renderer, ytd-playlist-video-renderer');
+                const title = card ? extractVideoTitle(card) : 'YouTube Video';
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                serverLog(`Link click intercepted: ${title} - ${link.href}`);
+                playExternal(link.href, title);
             }
         }, true);
-
-        // Enable theater mode when on video page (if not fullscreen)
-        if (location.pathname === '/watch') {
-            setTimeout(enableTheaterModeIfNeeded, 1000);
-        }
-
-        // Enable theater mode when exiting fullscreen
-        document.addEventListener('fullscreenchange', () => {
-            if (!document.fullscreenElement && location.pathname === '/watch') {
-                setTimeout(enableTheaterModeIfNeeded, 500);
-            }
-        });
 
         // Navigation
         document.addEventListener('keydown', handleNavKeydown, true);
@@ -605,17 +648,6 @@
 
         // Auto-select first video after page loads
         setTimeout(autoSelectFirst, 1000);
-
-        // SponsorBlock
-        function waitForVideo() {
-            const video = document.querySelector('video');
-            if (video) {
-                initSponsorBlock();
-            } else {
-                setTimeout(waitForVideo, 500);
-            }
-        }
-        waitForVideo();
     }
 
     if (document.readyState === 'loading') {

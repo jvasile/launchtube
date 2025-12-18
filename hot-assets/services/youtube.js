@@ -265,7 +265,7 @@
         const elements = [];
         const seen = new Set();
 
-        // Video cards on homepage and search results
+        // Video and playlist cards on homepage and search results
         const videoSelectors = [
             'ytd-rich-item-renderer',           // Homepage grid
             'ytd-video-renderer',               // Search results
@@ -273,6 +273,9 @@
             'ytd-grid-video-renderer',          // Grid layout
             'ytd-playlist-video-renderer',      // Playlist items
             'ytd-shelf-renderer ytd-video-renderer', // Shelf rows
+            'ytd-playlist-renderer',            // Playlist cards
+            'ytd-compact-playlist-renderer',    // Compact playlist cards
+            'ytd-grid-playlist-renderer',       // Grid playlist cards
         ];
 
         document.querySelectorAll(videoSelectors.join(',')).forEach(el => {
@@ -403,9 +406,21 @@
     function activateElement() {
         if (!selectedElement) return;
 
+        // Check if this is a playlist card
+        const isPlaylist = selectedElement.matches('ytd-playlist-renderer, ytd-compact-playlist-renderer, ytd-grid-playlist-renderer');
+        if (isPlaylist) {
+            const link = selectedElement.querySelector('a[href*="/playlist"]');
+            if (link && link.href) {
+                const title = selectedElement.querySelector('#video-title, #title, .title')?.textContent?.trim() || 'YouTube Playlist';
+                serverLog(`Playing playlist: ${title} - ${link.href}`);
+                playExternal(link.href, title);
+                return;
+            }
+        }
+
         // Check if this is a video card
         const isVideo = selectedElement.matches('ytd-rich-item-renderer, ytd-video-renderer, ytd-compact-video-renderer, ytd-grid-video-renderer, ytd-playlist-video-renderer');
-        serverLog(`Activating: isVideo=${isVideo}`);
+        serverLog(`Activating: isVideo=${isVideo}, isPlaylist=${isPlaylist}`);
 
         if (isVideo) {
             // Extract video URL and play externally
@@ -609,6 +624,21 @@
 
         // Intercept clicks on video thumbnails and links - play externally
         document.addEventListener('click', (e) => {
+            // Check for playlist card first
+            const playlistCard = e.target.closest('ytd-playlist-renderer, ytd-compact-playlist-renderer, ytd-grid-playlist-renderer');
+            if (playlistCard) {
+                const link = playlistCard.querySelector('a[href*="/playlist"]');
+                if (link && link.href) {
+                    const title = playlistCard.querySelector('#video-title, #title, .title')?.textContent?.trim() || 'YouTube Playlist';
+                    e.preventDefault();
+                    e.stopPropagation();
+                    e.stopImmediatePropagation();
+                    serverLog(`Playlist click intercepted: ${title} - ${link.href}`);
+                    playExternal(link.href, title);
+                    return;
+                }
+            }
+
             // Find the video card container
             const videoCard = e.target.closest('ytd-rich-item-renderer, ytd-video-renderer, ytd-compact-video-renderer, ytd-grid-video-renderer, ytd-playlist-video-renderer');
             if (videoCard) {
@@ -635,6 +665,18 @@
                 e.stopImmediatePropagation();
                 serverLog(`Link click intercepted: ${title} - ${link.href}`);
                 playExternal(link.href, title);
+                return;
+            }
+
+            // Intercept direct playlist link clicks
+            const playlistLink = e.target.closest('a[href*="/playlist"]');
+            if (playlistLink && playlistLink.href) {
+                const title = 'YouTube Playlist';
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                serverLog(`Playlist link click intercepted: ${playlistLink.href}`);
+                playExternal(playlistLink.href, title);
             }
         }, true);
 

@@ -52,12 +52,14 @@ func (a *App) startup(ctx context.Context) {
 
 	// Set up callbacks to show window when browser/player exits
 	a.server.SetOnBrowserExit(func() {
-		Log("Browser exited, showing window")
+		Log("Browser exited callback triggered, showing window")
 		runtime.WindowShow(a.ctx)
+		Log("Browser exited callback: WindowShow() completed")
 	})
 	a.server.SetOnPlayerExit(func() {
-		Log("Player exited, showing window")
+		Log("Player exited callback triggered, showing window")
 		runtime.WindowShow(a.ctx)
+		Log("Player exited callback: WindowShow() completed")
 	})
 	// Set up shutdown callback
 	a.server.SetOnShutdown(func() {

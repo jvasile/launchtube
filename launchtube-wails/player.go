@@ -98,7 +98,9 @@ func (p *Player) GetMpvOptions() string {
 }
 
 func (p *Player) Play(url, title string, startPosition float64, onComplete, onProgress map[string]interface{}) error {
+	Log("ExternalPlayer: Play() called with url=%s title=%s start=%.1f", url, title, startPosition)
 	p.Stop()
+	Log("ExternalPlayer: Stop() completed")
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -114,7 +116,10 @@ func (p *Player) Play(url, title string, startPosition float64, onComplete, onPr
 	p.playlist = nil
 	p.playlistPos = 0
 
-	return p.startMpv(url, title, startPosition)
+	Log("ExternalPlayer: calling startMpv()")
+	err := p.startMpv(url, title, startPosition)
+	Log("ExternalPlayer: startMpv() returned err=%v", err)
+	return err
 }
 
 func (p *Player) PlayPlaylist(items []PlaylistItem, startPosition float64) error {
@@ -173,12 +178,15 @@ func (p *Player) startMpv(url, title string, startPosition float64) error {
 
 	args = append(args, url)
 
-	Log("ExternalPlayer: Starting mpv with args: %v", args)
+	Log("ExternalPlayer: Starting mpv at path=%s with args: %v", p.mpvPath, args)
 
 	p.cmd = exec.Command(p.mpvPath, args...)
+	Log("ExternalPlayer: Calling cmd.Start()")
 	if err := p.cmd.Start(); err != nil {
+		Log("ExternalPlayer: cmd.Start() FAILED: %v", err)
 		return err
 	}
+	Log("ExternalPlayer: cmd.Start() succeeded, pid=%d", p.cmd.Process.Pid)
 
 	// Start position polling
 	p.stopPolling = make(chan struct{})
@@ -186,7 +194,9 @@ func (p *Player) startMpv(url, title string, startPosition float64) error {
 
 	// Wait for process to exit
 	go func() {
-		p.cmd.Wait()
+		Log("ExternalPlayer: waiting for process to exit...")
+		err := p.cmd.Wait()
+		Log("ExternalPlayer: process exited, err=%v", err)
 		p.mu.Lock()
 		p.playing = false
 		p.cmd = nil
@@ -201,12 +211,15 @@ func (p *Player) startMpv(url, title string, startPosition float64) error {
 		}
 
 		// Execute onComplete callback
+		Log("ExternalPlayer: executing onComplete callback")
 		p.executeOnComplete()
 
 		// Execute onExit callback (for Flutter respawn)
+		Log("ExternalPlayer: executing onExit callback (onExit=%v)", onExit != nil)
 		if onExit != nil {
 			onExit()
 		}
+		Log("ExternalPlayer: exit sequence complete")
 	}()
 
 	return nil
@@ -448,12 +461,19 @@ func (p *Player) executeOnProgress() {
 }
 
 func (p *Player) Stop() {
+	Log("ExternalPlayer: Stop() entering, about to lock mutex")
 	p.mu.Lock()
-	defer p.mu.Unlock()
+	Log("ExternalPlayer: Stop() mutex acquired, setting up defer")
+	defer func() {
+		Log("ExternalPlayer: Stop() unlocking mutex")
+		p.mu.Unlock()
+	}()
+	Log("ExternalPlayer: Stop() defer set up")
 
-	Log("ExternalPlayer: stop() called, cmd=%v", p.cmd)
+	Log("ExternalPlayer: Stop() checking cmd, cmd==nil: %v", p.cmd == nil)
 
 	if p.cmd == nil || p.cmd.Process == nil {
+		Log("ExternalPlayer: Stop() no process running, returning early")
 		return
 	}
 

@@ -561,6 +561,7 @@ func (s *Server) handleKV(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePlayerPlay(w http.ResponseWriter, r *http.Request) {
+	Log("handlePlayerPlay: received request method=%s", r.Method)
 	if r.Method != "POST" {
 		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
 		return
@@ -575,10 +576,13 @@ func (s *Server) handlePlayerPlay(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		Log("handlePlayerPlay: decode error: %v", err)
 		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, `{"error":"Invalid request"}`, http.StatusBadRequest)
 		return
 	}
+
+	Log("handlePlayerPlay: url=%s title=%s start=%.1f", req.URL, req.Title, req.StartPosition)
 
 	if req.URL == "" {
 		w.Header().Set("Content-Type", "application/json")
@@ -586,13 +590,16 @@ func (s *Server) handlePlayerPlay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	Log("handlePlayerPlay: calling player.Play()")
 	err := s.player.Play(req.URL, req.Title, req.StartPosition, req.OnComplete, req.OnProgress)
 	if err != nil {
+		Log("handlePlayerPlay: player.Play() returned error: %v", err)
 		w.Header().Set("Content-Type", "application/json")
 		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
 		return
 	}
 
+	Log("handlePlayerPlay: success, sending response")
 	w.Header().Set("Content-Type", "application/json")
 	fmt.Fprintf(w, `{"status":"playing","position":%.1f}`, req.StartPosition)
 }

@@ -247,6 +247,11 @@
         yt-tab-shape[tab-title="Shorts"] {
             display: none !important;
         }
+        /* Hide Playables */
+        ytd-rich-shelf-renderer:has([href*="/playables/"]),
+        ytd-rich-section-renderer:has([href*="/playables/"]) {
+            display: none !important;
+        }
         /* Hide sponsored/promoted content */
         ytd-ad-slot-renderer,
         ytd-promoted-sparkles-web-renderer,

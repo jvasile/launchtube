@@ -22,22 +22,23 @@ var (
 )
 
 type Server struct {
-	port         int
-	assetDir     string
-	dataDir      string
-	kvStore      *KVStore
-	player       *Player
-	fileCache    *FileCache
-	apps         []AppConfig
-	appsMu       sync.RWMutex
-	appsProfile  string
-	appsLoadTime time.Time
-	browserMgr   *BrowserManager
-	cdpBrowser   *CDPBrowser
-	useCDP       bool // Use CDP-based browser instead of extension-based
-	activeProfile string
-	onBrowserExit func()
-	onShutdown    func()
+	port                  int
+	assetDir              string
+	dataDir               string
+	kvStore               *KVStore
+	player                *Player
+	fileCache             *FileCache
+	apps                  []AppConfig
+	appsMu                sync.RWMutex
+	appsProfile           string
+	appsLoadTime          time.Time
+	browserMgr            *BrowserManager
+	cdpBrowser            *CDPBrowser
+	useCDP                bool // Use CDP-based browser instead of extension-based
+	activeProfile         string
+	onBrowserExit         func()
+	onShutdown            func()
+	screensaverInhibitor  *ScreensaverInhibitor
 }
 
 type AppConfig struct {
@@ -61,14 +62,18 @@ func NewServer() *Server {
 	// Extension mode is default (CDP triggers bot detection on YouTube etc)
 	useCDP := os.Getenv("LAUNCHTUBE_USE_CDP") == "1"
 
+	player := NewPlayer()
+	browserMgr := NewBrowserManager(assetDir, dataDir)
+
 	s := &Server{
 		assetDir:   assetDir,
 		dataDir:    dataDir,
 		kvStore:    NewKVStore(),
-		player:     NewPlayer(),
+		player:     player,
 		fileCache:  NewFileCache(),
-		browserMgr: NewBrowserManager(assetDir, dataDir), // Kept as fallback
+		browserMgr: browserMgr, // Kept as fallback
 		useCDP:     useCDP,
+		screensaverInhibitor: NewScreensaverInhibitor(player, browserMgr),
 	}
 
 	if useCDP {
@@ -76,6 +81,9 @@ func NewServer() *Server {
 	} else {
 		Log("Using extension-based browser")
 	}
+
+	// Start screensaver inhibitor
+	s.screensaverInhibitor.Start()
 
 	return s
 }

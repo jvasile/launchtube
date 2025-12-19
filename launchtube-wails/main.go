@@ -17,6 +17,9 @@ var assets embed.FS
 //go:embed services/*.webp services/*.png services/*.jpg services/*.svg services/*.json services/*.js
 var serviceAssets embed.FS
 
+//go:embed static/setup.html
+var staticAssets embed.FS
+
 func main() {
 	// Parse command line flags
 	userFlag := flag.String("user", "", "Username to auto-select on startup (case-insensitive)")

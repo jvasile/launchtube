@@ -745,15 +745,15 @@ func (s *Server) handleUserscript(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
-	htmlPath := filepath.Join(s.assetDir, "setup.html")
-	content, _, err := s.fileCache.GetString(htmlPath)
+	content, err := staticAssets.ReadFile("static/setup.html")
 	if err != nil {
 		http.Error(w, "Setup page not found", http.StatusNotFound)
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/html")
-	fmt.Fprint(w, content)
+	w.Header().Set("Cache-Control", "max-age=86400")
+	w.Write(content)
 }
 
 func (s *Server) handleInstall(w http.ResponseWriter, r *http.Request) {

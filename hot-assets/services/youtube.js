@@ -328,17 +328,19 @@
         // Top navigation bar
         const topnavSelectors = [
             'ytd-masthead #logo a',              // YouTube logo
-            'ytd-masthead ytd-searchbox',        // Search box
+            'ytd-masthead #center',              // Search box container
             'ytd-masthead #voice-search-button', // Voice search
             'ytd-masthead #buttons > ytd-topbar-menu-button-renderer', // Right-side buttons
         ];
         document.querySelectorAll(topnavSelectors.join(',')).forEach(el => {
             const rect = el.getBoundingClientRect();
+            serverLog(`topnav candidate: ${el.tagName}#${el.id} rect=${Math.round(rect.width)}x${Math.round(rect.height)}`);
             if (rect.width < 20 || rect.height < 20) return;
             if (seen.has(el)) return;
             seen.add(el);
             elements.push({ el, rect, type: 'topnav' });
         });
+        serverLog(`topnav elements found: ${elements.filter(e => e.type === 'topnav').length}`);
 
         // Sort by position
         elements.sort((a, b) => {
@@ -398,22 +400,22 @@
             if (el === selectedElement) continue;
 
             // For up/down, stay within same type (video grid, guide menu, etc)
-            // Exception: allow video/chip <-> tabs <-> topnav transitions
+            // Exception: allow video <-> chip/tabs <-> topnav transitions
             const isVertical = direction === 'up' || direction === 'down';
             if (isVertical && currentType && type !== currentType) {
-                const contentTypes = ['video', 'chip'];
+                const navTypes = ['chip', 'tabs']; // Filter chips and channel tabs
                 const allowedTransition =
-                    // video/chip -> tabs (up) or tabs -> video/chip (down)
-                    (direction === 'up' && type === 'tabs' && contentTypes.includes(currentType)) ||
-                    (direction === 'down' && currentType === 'tabs' && contentTypes.includes(type)) ||
-                    // tabs -> topnav (up) or topnav -> tabs (down)
-                    (direction === 'up' && type === 'topnav' && currentType === 'tabs') ||
-                    (direction === 'down' && currentType === 'topnav' && type === 'tabs') ||
-                    // video/chip -> topnav (up) when no tabs, or topnav -> video/chip (down) when no tabs
-                    (direction === 'up' && type === 'topnav' && contentTypes.includes(currentType)) ||
-                    (direction === 'down' && currentType === 'topnav' && contentTypes.includes(type));
+                    // video -> chip/tabs (up) or chip/tabs -> video (down)
+                    (direction === 'up' && navTypes.includes(type) && currentType === 'video') ||
+                    (direction === 'down' && navTypes.includes(currentType) && type === 'video') ||
+                    // chip/tabs -> topnav (up) or topnav -> chip/tabs (down)
+                    (direction === 'up' && type === 'topnav' && navTypes.includes(currentType)) ||
+                    (direction === 'down' && currentType === 'topnav' && navTypes.includes(type));
                 if (!allowedTransition) continue;
             }
+
+            // For left/right in topnav, stay within topnav
+            if (!isVertical && currentType === 'topnav' && type !== 'topnav') continue;
 
             const ex = rect.left + rect.width / 2;
             const ey = rect.top + rect.height / 2;
@@ -453,6 +455,16 @@
 
     function activateElement() {
         if (!selectedElement) return;
+
+        // Check if this is the search box container
+        if (selectedElement.id === 'center' || selectedElement.matches('#center')) {
+            const input = selectedElement.querySelector('input#search, input[name="search_query"]');
+            if (input) {
+                input.focus();
+                serverLog('Focused search input');
+                return;
+            }
+        }
 
         // Check if this is a playlist card
         const isPlaylist = selectedElement.matches('ytd-playlist-renderer, ytd-compact-playlist-renderer, ytd-grid-playlist-renderer');

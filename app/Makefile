@@ -1,4 +1,4 @@
-VERSION := 1.1.0
+VERSION := 2.0.0
 GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 BUILD_DATE := $(shell date -u +"%Y-%m-%d" 2>/dev/null || echo unknown)
 REPO_URL := $(shell git remote get-url origin 2>/dev/null | sed 's/\.git$$//' || echo unknown)

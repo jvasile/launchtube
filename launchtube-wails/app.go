@@ -404,7 +404,7 @@ func (a *App) GetServiceLibrary() []ServiceTemplate {
 
 		// Check for logo
 		baseName := name[:len(name)-5] // Remove .json
-		for _, ext := range []string{".png", ".jpg", ".svg"} {
+		for _, ext := range []string{".png", ".jpg", ".svg", ".webp"} {
 			logoPath := filepath.Join(servicesDir, baseName+ext)
 			if _, err := os.Stat(logoPath); err == nil {
 				service.LogoPath = logoPath

@@ -935,6 +935,23 @@ func (s *Server) handleImage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	info, err := os.Stat(absPath)
+	if err != nil {
+		http.Error(w, "File not found", http.StatusNotFound)
+		return
+	}
+
+	// Check If-Modified-Since for cache validation
+	modTime := info.ModTime()
+	if ims := r.Header.Get("If-Modified-Since"); ims != "" {
+		if t, err := http.ParseTime(ims); err == nil {
+			if modTime.Truncate(time.Second).Compare(t.Truncate(time.Second)) <= 0 {
+				w.WriteHeader(http.StatusNotModified)
+				return
+			}
+		}
+	}
+
 	data, err := os.ReadFile(absPath)
 	if err != nil {
 		http.Error(w, "File not found", http.StatusNotFound)
@@ -958,7 +975,8 @@ func (s *Server) handleImage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Cache-Control", "max-age=3600")
+	w.Header().Set("Last-Modified", modTime.UTC().Format(http.TimeFormat))
+	w.Header().Set("Cache-Control", "no-cache")
 	w.Write(data)
 }
 

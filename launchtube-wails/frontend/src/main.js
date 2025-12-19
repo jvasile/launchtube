@@ -132,7 +132,10 @@ function render(html) {
 
 function imageUrl(path) {
   if (!path) return '';
-  return `http://localhost:${serverPort}/api/1/image?path=${encodeURIComponent(path)}`;
+  // Absolute paths use path= param, relative paths use embed= param
+  const isAbsolute = path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path);
+  const param = isAbsolute ? 'path' : 'embed';
+  return `http://localhost:${serverPort}/api/1/image?${param}=${encodeURIComponent(path)}`;
 }
 
 function serviceImageUrl(serviceName) {

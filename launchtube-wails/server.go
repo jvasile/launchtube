@@ -745,7 +745,7 @@ func (s *Server) handleUserscript(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
-	content, err := staticAssets.ReadFile("static/setup.html")
+	content, err := embeddedAssets.ReadFile("assets/setup.html")
 	if err != nil {
 		http.Error(w, "Setup page not found", http.StatusNotFound)
 		return
@@ -936,7 +936,7 @@ func (s *Server) readServiceFile(filename string) ([]byte, error) {
 	}
 
 	// Fall back to embedded
-	return serviceAssets.ReadFile("services/" + filename)
+	return embeddedAssets.ReadFile("assets/services/" + filename)
 }
 
 // listServiceFiles returns all service files with given extension, merging filesystem and embedded
@@ -956,7 +956,7 @@ func (s *Server) listServiceFiles(ext string) []string {
 	}
 
 	// Add embedded files not already seen
-	if entries, err := serviceAssets.ReadDir("services"); err == nil {
+	if entries, err := embeddedAssets.ReadDir("assets/services"); err == nil {
 		for _, entry := range entries {
 			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ext) && !seen[entry.Name()] {
 				files = append(files, entry.Name())
@@ -975,10 +975,16 @@ func (s *Server) handleImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check for embed param (direct embedded asset lookup)
+	if embed := r.URL.Query().Get("embed"); embed != "" {
+		s.serveEmbeddedImage(w, r, embed)
+		return
+	}
+
 	// Fall back to path param (filesystem lookup)
 	path := r.URL.Query().Get("path")
 	if path == "" {
-		http.Error(w, "Missing path or service parameter", http.StatusBadRequest)
+		http.Error(w, "Missing path, service, or embed parameter", http.StatusBadRequest)
 		return
 	}
 
@@ -1057,8 +1063,8 @@ func (s *Server) serveServiceImage(w http.ResponseWriter, r *http.Request, servi
 
 	// Fall back to embedded assets
 	for _, ext := range extensions {
-		filename := "services/" + serviceID + ext
-		if data, err := serviceAssets.ReadFile(filename); err == nil {
+		filename := "assets/services/" + serviceID + ext
+		if data, err := embeddedAssets.ReadFile(filename); err == nil {
 			// Embedded assets don't change, use long cache
 			w.Header().Set("Cache-Control", "max-age=86400")
 			s.writeImageResponse(w, ext, data, time.Time{})
@@ -1067,6 +1073,45 @@ func (s *Server) serveServiceImage(w http.ResponseWriter, r *http.Request, servi
 	}
 
 	http.Error(w, "Service image not found", http.StatusNotFound)
+}
+
+// serveEmbeddedImage serves an image from embedded assets with filesystem override
+func (s *Server) serveEmbeddedImage(w http.ResponseWriter, r *http.Request, embedPath string) {
+	// Security: sanitize path to prevent directory traversal
+	embedPath = filepath.Clean(embedPath)
+	if strings.HasPrefix(embedPath, "..") || strings.HasPrefix(embedPath, "/") {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+
+	// Try filesystem first (in assetDir)
+	fsPath := filepath.Join(s.assetDir, embedPath)
+	if info, err := os.Stat(fsPath); err == nil {
+		modTime := info.ModTime()
+		if ims := r.Header.Get("If-Modified-Since"); ims != "" {
+			if t, err := http.ParseTime(ims); err == nil {
+				if modTime.Truncate(time.Second).Compare(t.Truncate(time.Second)) <= 0 {
+					w.WriteHeader(http.StatusNotModified)
+					return
+				}
+			}
+		}
+		if data, err := os.ReadFile(fsPath); err == nil {
+			w.Header().Set("Cache-Control", "no-cache")
+			s.writeImageResponse(w, filepath.Ext(fsPath), data, modTime)
+			return
+		}
+	}
+
+	// Fall back to embedded assets
+	assetPath := "assets/" + embedPath
+	if data, err := embeddedAssets.ReadFile(assetPath); err == nil {
+		w.Header().Set("Cache-Control", "max-age=86400")
+		s.writeImageResponse(w, filepath.Ext(embedPath), data, time.Time{})
+		return
+	}
+
+	http.Error(w, "Image not found", http.StatusNotFound)
 }
 
 // writeImageResponse writes image data with appropriate headers

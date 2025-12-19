@@ -104,9 +104,9 @@ func (a *App) GetProfiles() []Profile {
 			continue
 		}
 
-		// Convert relative photoPath to absolute (photos are in assets/images/profile-photos/)
+		// Convert relative photoPath to embed path (for use with embed= param)
 		if profile.PhotoPath != "" && !filepath.IsAbs(profile.PhotoPath) {
-			profile.PhotoPath = filepath.Join(a.server.assetDir, "images", "profile-photos", profile.PhotoPath)
+			profile.PhotoPath = "images/profile-photos/" + profile.PhotoPath
 		}
 
 		profiles = append(profiles, profile)
@@ -189,9 +189,9 @@ func (a *App) GetServerPort() int {
 	return a.server.GetPort()
 }
 
-// GetLogoPath returns the logo image path
+// GetLogoPath returns the logo embed path (for use with embed= param)
 func (a *App) GetLogoPath() string {
-	return filepath.Join(a.server.assetDir, "images", "launch-tube-logo", "logo_wide.png")
+	return "images/launchtube-logo/logo_wide.webp"
 }
 
 // ServiceTemplate represents a streaming service from the library
@@ -309,25 +309,59 @@ func (a *App) DeleteProfile(id string) error {
 	return os.RemoveAll(profileDir)
 }
 
-// GetProfilePhotos returns available profile photos
+// GetProfilePhotos returns available profile photos (embed paths for use with embed= param)
 func (a *App) GetProfilePhotos() []string {
-	photosDir := filepath.Join(a.server.assetDir, "images", "profile-photos")
-	entries, err := os.ReadDir(photosDir)
-	if err != nil {
-		return []string{}
+	seen := make(map[string]bool)
+	var photos []string
+	validExts := map[string]bool{".png": true, ".jpg": true, ".jpeg": true, ".webp": true}
+
+	// Check user's data dir first (custom uploaded photos)
+	userPhotosDir := filepath.Join(a.server.dataDir, "images", "profile-photos")
+	if entries, err := os.ReadDir(userPhotosDir); err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			name := entry.Name()
+			if validExts[strings.ToLower(filepath.Ext(name))] {
+				// Return full path for user-uploaded photos (use path= param)
+				photos = append(photos, filepath.Join(userPhotosDir, name))
+				seen[name] = true
+			}
+		}
 	}
 
-	var photos []string
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		ext := strings.ToLower(filepath.Ext(name))
-		if ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".webp" {
-			photos = append(photos, filepath.Join(photosDir, name))
+	// Check assetDir (hot-assets override)
+	assetPhotosDir := filepath.Join(a.server.assetDir, "images", "profile-photos")
+	if entries, err := os.ReadDir(assetPhotosDir); err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			name := entry.Name()
+			if validExts[strings.ToLower(filepath.Ext(name))] && !seen[name] {
+				// Return embed path for override photos
+				photos = append(photos, "images/profile-photos/"+name)
+				seen[name] = true
+			}
 		}
 	}
+
+	// Add embedded photos not already seen
+	if entries, err := embeddedAssets.ReadDir("assets/images/profile-photos"); err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			name := entry.Name()
+			if validExts[strings.ToLower(filepath.Ext(name))] && !seen[name] {
+				// Return embed path for bundled photos
+				photos = append(photos, "images/profile-photos/"+name)
+				seen[name] = true
+			}
+		}
+	}
+
 	return photos
 }
 

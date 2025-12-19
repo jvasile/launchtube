@@ -14,11 +14,8 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
-//go:embed services/*.webp services/*.png services/*.jpg services/*.svg services/*.json services/*.js
-var serviceAssets embed.FS
-
-//go:embed static/setup.html
-var staticAssets embed.FS
+//go:embed assets/services/* assets/images/launchtube-logo/* assets/images/profile-photos/*.webp assets/setup.html
+var embeddedAssets embed.FS
 
 func main() {
 	// Parse command line flags

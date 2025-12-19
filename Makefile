@@ -3,19 +3,19 @@
 build: linux
 
 linux:
-	$(MAKE) -C launchtube-wails linux
+	$(MAKE) -C app linux
 
 windows:
-	$(MAKE) -C launchtube-wails windows
+	$(MAKE) -C app windows
 
 dev:
-	$(MAKE) -C launchtube-wails dev
+	$(MAKE) -C app dev
 
 run: linux
-	./launchtube-wails/build/bin/launchtube-wails
+	./app/build/bin/launchtube
 
 clean:
-	$(MAKE) -C launchtube-wails clean
+	$(MAKE) -C app clean
 
 install:
-	$(MAKE) -C launchtube-wails install
+	$(MAKE) -C app install

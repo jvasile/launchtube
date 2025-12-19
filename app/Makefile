@@ -27,7 +27,7 @@ clean:
 	rm -rf frontend/node_modules
 
 run: linux
-	./build/bin/launchtube-wails
+	./build/bin/launchtube
 
 install: linux
-	install -m 755 build/bin/launchtube-wails $(HOME)/.local/bin/launchtube
+	install -m 755 build/bin/launchtube $(HOME)/.local/bin/launchtube

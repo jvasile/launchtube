@@ -71,7 +71,7 @@ export namespace main {
 	    url: string;
 	    matchUrls?: string[];
 	    colorValue: number;
-	    logoPath?: string;
+	    hasLogo: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new ServiceTemplate(source);
@@ -83,7 +83,7 @@ export namespace main {
 	        this.url = source["url"];
 	        this.matchUrls = source["matchUrls"];
 	        this.colorValue = source["colorValue"];
-	        this.logoPath = source["logoPath"];
+	        this.hasLogo = source["hasLogo"];
 	    }
 	}
 

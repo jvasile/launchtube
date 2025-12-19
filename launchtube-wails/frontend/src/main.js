@@ -135,6 +135,11 @@ function imageUrl(path) {
   return `http://localhost:${serverPort}/api/1/image?path=${encodeURIComponent(path)}`;
 }
 
+function serviceImageUrl(serviceName) {
+  if (!serviceName) return '';
+  return `http://localhost:${serverPort}/api/1/image?service=${encodeURIComponent(serviceName)}`;
+}
+
 function intToColor(value) {
   if (!value) return '#333333';
   const hex = (value & 0xFFFFFF).toString(16).padStart(6, '0');
@@ -646,8 +651,10 @@ function renderLauncher() {
                tabindex="0"
                data-index="${i}"
                style="background-color: ${intToColor(app.colorValue)}">
-            ${app.imagePath ? `<img src="${imageUrl(app.imagePath)}" alt="${escapeHtml(app.name)}">` : ''}
-            ${app.showName || !app.imagePath ? `<div class="app-name">${escapeHtml(app.name)}</div>` : ''}
+            ${app.imagePath
+              ? `<img src="${imageUrl(app.imagePath)}" alt="${escapeHtml(app.name)}">`
+              : `<img src="${serviceImageUrl(app.name)}" alt="${escapeHtml(app.name)}" onerror="this.style.display='none'">`}
+            ${app.showName ? `<div class="app-name">${escapeHtml(app.name)}</div>` : ''}
             <button class="app-edit-btn" data-edit="${i}" tabindex="-1">⚙</button>
           </div>
         `).join('')}
@@ -1470,7 +1477,7 @@ function showLibrary() {
       <div class="library-grid">
         ${available.map((service, i) => `
           <div class="library-tile" tabindex="0" data-index="${i}" style="background-color: ${intToColor(service.colorValue)}">
-            ${service.logoPath ? `<img src="${imageUrl(service.logoPath)}" alt="${escapeHtml(service.name)}">` : `<div class="app-name">${escapeHtml(service.name)}</div>`}
+            ${service.hasLogo ? `<img src="${serviceImageUrl(service.name)}" alt="${escapeHtml(service.name)}">` : `<div class="app-name">${escapeHtml(service.name)}</div>`}
           </div>
         `).join('')}
         ${available.length === 0 ? '<p class="no-services">All available services have been added!</p>' : ''}
@@ -1615,9 +1622,9 @@ async function addService(service) {
     matchUrls: service.matchUrls || null,
     commandLine: null,
     type: 0, // website
-    imagePath: service.logoPath,
+    imagePath: null, // resolved by service name at render time
     colorValue: service.colorValue || 0xFF333333,
-    showName: !service.logoPath,
+    showName: !service.hasLogo,
     focusAlert: service.focusAlert || false,
   };
 

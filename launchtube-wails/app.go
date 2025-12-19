@@ -200,7 +200,7 @@ type ServiceTemplate struct {
 	URL        string   `json:"url"`
 	MatchURLs  []string `json:"matchUrls,omitempty"`
 	ColorValue int      `json:"colorValue"`
-	LogoPath   string   `json:"logoPath,omitempty"`
+	HasLogo    bool     `json:"hasLogo"`
 }
 
 // CreateProfile creates a new profile
@@ -402,12 +402,12 @@ func (a *App) GetServiceLibrary() []ServiceTemplate {
 			continue
 		}
 
-		// Check for logo
+		// Check if logo exists
 		baseName := name[:len(name)-5] // Remove .json
 		for _, ext := range []string{".png", ".jpg", ".svg", ".webp"} {
 			logoPath := filepath.Join(servicesDir, baseName+ext)
 			if _, err := os.Stat(logoPath); err == nil {
-				service.LogoPath = logoPath
+				service.HasLogo = true
 				break
 			}
 		}

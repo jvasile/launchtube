@@ -907,11 +907,26 @@ func (s *Server) DetectBrowsers() []BrowserInfo {
 	return s.browserMgr.DetectBrowsers()
 }
 
-// handleImage serves images from local filesystem
+// nameToServiceID converts a service name to a filesystem-safe ID
+func nameToServiceID(name string) string {
+	id := strings.ToLower(name)
+	id = strings.ReplaceAll(id, " ", "-")
+	id = strings.ReplaceAll(id, "+", "")
+	return id
+}
+
+// handleImage serves images from embedded assets or local filesystem
 func (s *Server) handleImage(w http.ResponseWriter, r *http.Request) {
+	// Check for service param (embedded image lookup by name)
+	if service := r.URL.Query().Get("service"); service != "" {
+		s.serveServiceImage(w, r, service)
+		return
+	}
+
+	// Fall back to path param (filesystem lookup)
 	path := r.URL.Query().Get("path")
 	if path == "" {
-		http.Error(w, "Missing path", http.StatusBadRequest)
+		http.Error(w, "Missing path or service parameter", http.StatusBadRequest)
 		return
 	}
 
@@ -958,10 +973,54 @@ func (s *Server) handleImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Detect content type
-	ext := strings.ToLower(filepath.Ext(absPath))
+	s.writeImageResponse(w, filepath.Ext(absPath), data, modTime)
+}
+
+// serveServiceImage serves an image for a service by name
+func (s *Server) serveServiceImage(w http.ResponseWriter, r *http.Request, serviceName string) {
+	serviceID := nameToServiceID(serviceName)
+	extensions := []string{".webp", ".png", ".jpg", ".svg"}
+
+	// Try filesystem in assetDir/services/ first (hot-assets override)
+	for _, ext := range extensions {
+		path := filepath.Join(s.assetDir, "services", serviceID+ext)
+		if info, err := os.Stat(path); err == nil {
+			// Check If-Modified-Since for filesystem files
+			modTime := info.ModTime()
+			if ims := r.Header.Get("If-Modified-Since"); ims != "" {
+				if t, err := http.ParseTime(ims); err == nil {
+					if modTime.Truncate(time.Second).Compare(t.Truncate(time.Second)) <= 0 {
+						w.WriteHeader(http.StatusNotModified)
+						return
+					}
+				}
+			}
+			if data, err := os.ReadFile(path); err == nil {
+				w.Header().Set("Cache-Control", "no-cache")
+				s.writeImageResponse(w, ext, data, modTime)
+				return
+			}
+		}
+	}
+
+	// Fall back to embedded assets
+	for _, ext := range extensions {
+		filename := "services/" + serviceID + ext
+		if data, err := serviceAssets.ReadFile(filename); err == nil {
+			// Embedded assets don't change, use long cache
+			w.Header().Set("Cache-Control", "max-age=86400")
+			s.writeImageResponse(w, ext, data, time.Time{})
+			return
+		}
+	}
+
+	http.Error(w, "Service image not found", http.StatusNotFound)
+}
+
+// writeImageResponse writes image data with appropriate headers
+func (s *Server) writeImageResponse(w http.ResponseWriter, ext string, data []byte, modTime time.Time) {
 	contentType := "application/octet-stream"
-	switch ext {
+	switch strings.ToLower(ext) {
 	case ".png":
 		contentType = "image/png"
 	case ".jpg", ".jpeg":
@@ -975,8 +1034,9 @@ func (s *Server) handleImage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Last-Modified", modTime.UTC().Format(http.TimeFormat))
-	w.Header().Set("Cache-Control", "no-cache")
+	if !modTime.IsZero() {
+		w.Header().Set("Last-Modified", modTime.UTC().Format(http.TimeFormat))
+	}
 	w.Write(data)
 }
 
@@ -987,7 +1047,7 @@ type ServiceLibraryItem struct {
 	MatchURLs  []string `json:"matchUrls,omitempty"`
 	Color      string   `json:"color"`
 	ColorValue int      `json:"colorValue"`
-	LogoPath   string   `json:"logoPath,omitempty"`
+	HasLogo    bool     `json:"hasLogo"`
 	FocusAlert bool     `json:"focusAlert,omitempty"`
 }
 
@@ -1045,12 +1105,12 @@ func (s *Server) handleServiceLibrary(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Find logo
+		// Check if logo exists
 		baseName := name[:len(name)-5]
 		for _, ext := range []string{".png", ".jpg", ".svg", ".webp"} {
 			logoPath := filepath.Join(servicesDir, baseName+ext)
 			if _, err := os.Stat(logoPath); err == nil {
-				service.LogoPath = logoPath
+				service.HasLogo = true
 				break
 			}
 		}

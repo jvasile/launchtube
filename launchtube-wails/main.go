@@ -14,6 +14,9 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+//go:embed services/*.webp services/*.png services/*.jpg services/*.svg
+var serviceAssets embed.FS
+
 func main() {
 	// Parse command line flags
 	userFlag := flag.String("user", "", "Username to auto-select on startup (case-insensitive)")

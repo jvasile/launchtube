@@ -331,7 +331,24 @@ func (a *App) GetProfilePhotos() []string {
 		}
 	}
 
-	// Check assetDir (hot-assets override)
+	// Check overrides
+	if a.server.overridesDir != "" {
+		overridesPhotosDir := filepath.Join(a.server.overridesDir, "images", "profile-photos")
+		if entries, err := os.ReadDir(overridesPhotosDir); err == nil {
+			for _, entry := range entries {
+				if entry.IsDir() {
+					continue
+				}
+				name := entry.Name()
+				if validExts[strings.ToLower(filepath.Ext(name))] && !seen[name] {
+					photos = append(photos, "images/profile-photos/"+name)
+					seen[name] = true
+				}
+			}
+		}
+	}
+
+	// Check assetDir (downloaded or hot-assets)
 	assetPhotosDir := filepath.Join(a.server.assetDir, "images", "profile-photos")
 	if entries, err := os.ReadDir(assetPhotosDir); err == nil {
 		for _, entry := range entries {
@@ -340,24 +357,7 @@ func (a *App) GetProfilePhotos() []string {
 			}
 			name := entry.Name()
 			if validExts[strings.ToLower(filepath.Ext(name))] && !seen[name] {
-				// Return embed path for override photos
 				photos = append(photos, "images/profile-photos/"+name)
-				seen[name] = true
-			}
-		}
-	}
-
-	// Add embedded photos not already seen
-	if entries, err := embeddedAssets.ReadDir("assets/images/profile-photos"); err == nil {
-		for _, entry := range entries {
-			if entry.IsDir() {
-				continue
-			}
-			name := entry.Name()
-			if validExts[strings.ToLower(filepath.Ext(name))] && !seen[name] {
-				// Return embed path for bundled photos
-				photos = append(photos, "images/profile-photos/"+name)
-				seen[name] = true
 			}
 		}
 	}

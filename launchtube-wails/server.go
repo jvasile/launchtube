@@ -20,11 +20,13 @@ var (
 	version   = "dev"
 	commit    = "unknown"
 	buildDate = "unknown"
+	repoURL   = "unknown"
 )
 
 type Server struct {
 	port                  int
 	assetDir              string
+	overridesDir          string
 	dataDir               string
 	kvStore               *KVStore
 	player                *Player
@@ -58,17 +60,26 @@ type AppConfig struct {
 func NewServer() *Server {
 	home, _ := os.UserHomeDir()
 	dataDir := filepath.Join(home, ".local", "share", "launchtube")
-	assetDir := findAssetDirectory()
+	overridesDir := filepath.Join(dataDir, "overrides")
+
+	// Ensure assets are downloaded (unless in dev mode with hot-assets)
+	assetDir := findAssetDirectory(dataDir)
+	if assetDir == filepath.Join(dataDir, "assets") {
+		if err := EnsureAssets(dataDir); err != nil {
+			Log("Warning: failed to download assets: %v", err)
+		}
+	}
 
 	// Extension mode is default (CDP triggers bot detection on YouTube etc)
 	useCDP := os.Getenv("LAUNCHTUBE_USE_CDP") == "1"
 
 	player := NewPlayer(dataDir)
-	browserMgr := NewBrowserManager(assetDir, dataDir)
+	browserMgr := NewBrowserManager(overridesDir, assetDir, dataDir)
 
 	s := &Server{
-		assetDir:   assetDir,
-		dataDir:    dataDir,
+		assetDir:     assetDir,
+		overridesDir: overridesDir,
+		dataDir:      dataDir,
 		kvStore:    NewKVStore(),
 		player:     player,
 		fileCache:  NewFileCache(),
@@ -146,13 +157,8 @@ func (s *Server) GetAppsForProfile(profileID string) []AppConfig {
 	return apps
 }
 
-func findAssetDirectory() string {
-	home, _ := os.UserHomeDir()
-	installed := filepath.Join(home, ".local", "share", "launchtube", "assets")
-	if info, err := os.Stat(installed); err == nil && info.IsDir() {
-		return installed
-	}
-
+func findAssetDirectory(dataDir string) string {
+	// Dev mode: check for hot-assets first
 	cwd, _ := os.Getwd()
 	hotAssets := filepath.Join(cwd, "hot-assets")
 	if info, err := os.Stat(hotAssets); err == nil && info.IsDir() {
@@ -165,7 +171,8 @@ func findAssetDirectory() string {
 		return hotAssets
 	}
 
-	return installed
+	// Production: use downloaded assets
+	return filepath.Join(dataDir, "assets")
 }
 
 func (s *Server) Start() error {
@@ -745,15 +752,7 @@ func (s *Server) handleUserscript(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
-	content, err := embeddedAssets.ReadFile("assets/setup.html")
-	if err != nil {
-		http.Error(w, "Setup page not found", http.StatusNotFound)
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/html")
-	w.Header().Set("Cache-Control", "max-age=86400")
-	w.Write(content)
+	http.Error(w, "Firefox/userscript setup is no longer supported", http.StatusGone)
 }
 
 func (s *Server) handleInstall(w http.ResponseWriter, r *http.Request) {
@@ -927,43 +926,52 @@ func nameToServiceID(name string) string {
 	return id
 }
 
-// readServiceFile reads a service file, checking assetDir first then embedded
-func (s *Server) readServiceFile(filename string) ([]byte, error) {
-	// Try filesystem first (hot-assets override)
-	path := filepath.Join(s.assetDir, "services", filename)
-	if data, err := os.ReadFile(path); err == nil {
-		return data, nil
+// findFile looks for a file, checking overrides first then assetDir
+func (s *Server) findFile(relPath string) string {
+	// Check overrides first
+	if s.overridesDir != "" {
+		path := filepath.Join(s.overridesDir, relPath)
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
 	}
-
-	// Fall back to embedded
-	return embeddedAssets.ReadFile("assets/services/" + filename)
+	// Fall back to assetDir
+	return filepath.Join(s.assetDir, relPath)
 }
 
-// listServiceFiles returns all service files with given extension, merging filesystem and embedded
+// readServiceFile reads a service file, checking overrides first
+func (s *Server) readServiceFile(filename string) ([]byte, error) {
+	path := s.findFile(filepath.Join("services", filename))
+	return os.ReadFile(path)
+}
+
+// listServiceFiles returns all service files with given extension, merging overrides and assetDir
 func (s *Server) listServiceFiles(ext string) []string {
 	seen := make(map[string]bool)
 	var files []string
 
-	// Check filesystem first
-	servicesDir := filepath.Join(s.assetDir, "services")
-	if entries, err := os.ReadDir(servicesDir); err == nil {
-		for _, entry := range entries {
-			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ext) {
-				files = append(files, entry.Name())
-				seen[entry.Name()] = true
+	// Check overrides first
+	if s.overridesDir != "" {
+		overridesServicesDir := filepath.Join(s.overridesDir, "services")
+		if entries, err := os.ReadDir(overridesServicesDir); err == nil {
+			for _, entry := range entries {
+				if !entry.IsDir() && strings.HasSuffix(entry.Name(), ext) {
+					files = append(files, entry.Name())
+					seen[entry.Name()] = true
+				}
 			}
 		}
 	}
 
-	// Add embedded files not already seen
-	if entries, err := embeddedAssets.ReadDir("assets/services"); err == nil {
+	// Add from assetDir (skip duplicates)
+	servicesDir := filepath.Join(s.assetDir, "services")
+	if entries, err := os.ReadDir(servicesDir); err == nil {
 		for _, entry := range entries {
 			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ext) && !seen[entry.Name()] {
 				files = append(files, entry.Name())
 			}
 		}
 	}
-
 	return files
 }
 
@@ -1039,11 +1047,9 @@ func (s *Server) serveServiceImage(w http.ResponseWriter, r *http.Request, servi
 	serviceID := nameToServiceID(serviceName)
 	extensions := []string{".webp", ".png", ".jpg", ".svg"}
 
-	// Try filesystem in assetDir/services/ first (hot-assets override)
 	for _, ext := range extensions {
-		path := filepath.Join(s.assetDir, "services", serviceID+ext)
+		path := s.findFile(filepath.Join("services", serviceID+ext))
 		if info, err := os.Stat(path); err == nil {
-			// Check If-Modified-Since for filesystem files
 			modTime := info.ModTime()
 			if ims := r.Header.Get("If-Modified-Since"); ims != "" {
 				if t, err := http.ParseTime(ims); err == nil {
@@ -1061,21 +1067,10 @@ func (s *Server) serveServiceImage(w http.ResponseWriter, r *http.Request, servi
 		}
 	}
 
-	// Fall back to embedded assets
-	for _, ext := range extensions {
-		filename := "assets/services/" + serviceID + ext
-		if data, err := embeddedAssets.ReadFile(filename); err == nil {
-			// Embedded assets don't change, use long cache
-			w.Header().Set("Cache-Control", "max-age=86400")
-			s.writeImageResponse(w, ext, data, time.Time{})
-			return
-		}
-	}
-
 	http.Error(w, "Service image not found", http.StatusNotFound)
 }
 
-// serveEmbeddedImage serves an image from embedded assets with filesystem override
+// serveEmbeddedImage serves an image by relative path, checking overrides first
 func (s *Server) serveEmbeddedImage(w http.ResponseWriter, r *http.Request, embedPath string) {
 	// Security: sanitize path to prevent directory traversal
 	embedPath = filepath.Clean(embedPath)
@@ -1084,34 +1079,31 @@ func (s *Server) serveEmbeddedImage(w http.ResponseWriter, r *http.Request, embe
 		return
 	}
 
-	// Try filesystem first (in assetDir)
-	fsPath := filepath.Join(s.assetDir, embedPath)
-	if info, err := os.Stat(fsPath); err == nil {
-		modTime := info.ModTime()
-		if ims := r.Header.Get("If-Modified-Since"); ims != "" {
-			if t, err := http.ParseTime(ims); err == nil {
-				if modTime.Truncate(time.Second).Compare(t.Truncate(time.Second)) <= 0 {
-					w.WriteHeader(http.StatusNotModified)
-					return
-				}
-			}
-		}
-		if data, err := os.ReadFile(fsPath); err == nil {
-			w.Header().Set("Cache-Control", "no-cache")
-			s.writeImageResponse(w, filepath.Ext(fsPath), data, modTime)
-			return
-		}
-	}
-
-	// Fall back to embedded assets
-	assetPath := "assets/" + embedPath
-	if data, err := embeddedAssets.ReadFile(assetPath); err == nil {
-		w.Header().Set("Cache-Control", "max-age=86400")
-		s.writeImageResponse(w, filepath.Ext(embedPath), data, time.Time{})
+	fsPath := s.findFile(embedPath)
+	info, err := os.Stat(fsPath)
+	if err != nil {
+		http.Error(w, "Image not found", http.StatusNotFound)
 		return
 	}
 
-	http.Error(w, "Image not found", http.StatusNotFound)
+	modTime := info.ModTime()
+	if ims := r.Header.Get("If-Modified-Since"); ims != "" {
+		if t, err := http.ParseTime(ims); err == nil {
+			if modTime.Truncate(time.Second).Compare(t.Truncate(time.Second)) <= 0 {
+				w.WriteHeader(http.StatusNotModified)
+				return
+			}
+		}
+	}
+
+	data, err := os.ReadFile(fsPath)
+	if err != nil {
+		http.Error(w, "Image not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Cache-Control", "no-cache")
+	s.writeImageResponse(w, filepath.Ext(fsPath), data, modTime)
 }
 
 // writeImageResponse writes image data with appropriate headers

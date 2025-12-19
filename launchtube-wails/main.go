@@ -14,9 +14,6 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
-//go:embed assets/services/* assets/images/launchtube-logo/* assets/images/profile-photos/*.webp assets/setup.html
-var embeddedAssets embed.FS
-
 func main() {
 	// Parse command line flags
 	userFlag := flag.String("user", "", "Username to auto-select on startup (case-insensitive)")

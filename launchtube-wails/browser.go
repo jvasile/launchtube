@@ -42,15 +42,17 @@ type BrowserManager struct {
 	cmd            *exec.Cmd
 	pid            int
 	browser        *BrowserInfo
+	overridesDir   string
 	assetDir       string
 	dataDir        string
 	onExit         func()
 }
 
-func NewBrowserManager(assetDir, dataDir string) *BrowserManager {
+func NewBrowserManager(overridesDir, assetDir, dataDir string) *BrowserManager {
 	return &BrowserManager{
-		assetDir: assetDir,
-		dataDir:  dataDir,
+		overridesDir: overridesDir,
+		assetDir:     assetDir,
+		dataDir:      dataDir,
 	}
 }
 
@@ -58,6 +60,23 @@ func (bm *BrowserManager) SetOnExit(fn func()) {
 	bm.mu.Lock()
 	bm.onExit = fn
 	bm.mu.Unlock()
+}
+
+// findExtension looks for an extension, checking overrides first then assetDir
+func (bm *BrowserManager) findExtension(name string) string {
+	// Check overrides first
+	if bm.overridesDir != "" {
+		path := filepath.Join(bm.overridesDir, "extensions", name)
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
+	// Fall back to assetDir
+	path := filepath.Join(bm.assetDir, "extensions", name)
+	if _, err := os.Stat(path); err == nil {
+		return path
+	}
+	return ""
 }
 
 func (bm *BrowserManager) DetectBrowsers() []BrowserInfo {
@@ -113,24 +132,21 @@ func (bm *BrowserManager) Launch(browserName, url, profileID string, serverPort 
 		var extensions []string
 
 		// LaunchTube loader extension
-		launchtubeExt := filepath.Join(bm.assetDir, "extensions", "launchtube")
-		if _, err := os.Stat(launchtubeExt); err == nil {
-			extensions = append(extensions, launchtubeExt)
-			Log("Loading LaunchTube extension from: %s", launchtubeExt)
+		if ext := bm.findExtension("launchtube"); ext != "" {
+			extensions = append(extensions, ext)
+			Log("Loading LaunchTube extension from: %s", ext)
 		}
 
 		// uBlock Origin Lite
-		ublockExt := filepath.Join(bm.assetDir, "extensions", "ublock-origin")
-		if _, err := os.Stat(ublockExt); err == nil {
-			extensions = append(extensions, ublockExt)
-			Log("Loading uBlock Origin from: %s", ublockExt)
+		if ext := bm.findExtension("ublock-origin"); ext != "" {
+			extensions = append(extensions, ext)
+			Log("Loading uBlock Origin from: %s", ext)
 		}
 
 		// Dark Reader
-		darkReaderExt := filepath.Join(bm.assetDir, "extensions", "dark-reader")
-		if _, err := os.Stat(darkReaderExt); err == nil {
-			extensions = append(extensions, darkReaderExt)
-			Log("Loading Dark Reader from: %s", darkReaderExt)
+		if ext := bm.findExtension("dark-reader"); ext != "" {
+			extensions = append(extensions, ext)
+			Log("Loading Dark Reader from: %s", ext)
 		}
 
 		if len(extensions) > 0 {

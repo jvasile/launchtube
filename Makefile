@@ -1,4 +1,4 @@
-.PHONY: build linux windows clean run dev
+.PHONY: build linux windows clean run dev install
 
 build: linux
 
@@ -16,3 +16,6 @@ run: linux
 
 clean:
 	$(MAKE) -C launchtube-wails clean
+
+install:
+	$(MAKE) -C launchtube-wails install

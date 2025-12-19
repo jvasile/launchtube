@@ -373,26 +373,11 @@ func (a *App) SetMpvOptions(options string) {
 
 // GetServiceLibrary returns available streaming services
 func (a *App) GetServiceLibrary() []ServiceTemplate {
-	servicesDir := filepath.Join(a.server.assetDir, "services")
-	entries, err := os.ReadDir(servicesDir)
-	if err != nil {
-		Log("Failed to read services dir: %v", err)
-		return []ServiceTemplate{}
-	}
+	jsonFiles := a.server.listServiceFiles(".json")
 
 	var services []ServiceTemplate
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-
-		name := entry.Name()
-		if filepath.Ext(name) != ".json" {
-			continue
-		}
-
-		jsonPath := filepath.Join(servicesDir, name)
-		data, err := os.ReadFile(jsonPath)
+	for _, name := range jsonFiles {
+		data, err := a.server.readServiceFile(name)
 		if err != nil {
 			continue
 		}
@@ -402,11 +387,10 @@ func (a *App) GetServiceLibrary() []ServiceTemplate {
 			continue
 		}
 
-		// Check if logo exists
+		// Check if logo exists (filesystem or embedded)
 		baseName := name[:len(name)-5] // Remove .json
 		for _, ext := range []string{".png", ".jpg", ".svg", ".webp"} {
-			logoPath := filepath.Join(servicesDir, baseName+ext)
-			if _, err := os.Stat(logoPath); err == nil {
+			if _, err := a.server.readServiceFile(baseName + ext); err == nil {
 				service.HasLogo = true
 				break
 			}

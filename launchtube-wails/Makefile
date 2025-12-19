@@ -14,6 +14,7 @@ install-wails:
 copy-services:
 	@mkdir -p services
 	@cp -u ../hot-assets/services/*.webp ../hot-assets/services/*.png ../hot-assets/services/*.jpg ../hot-assets/services/*.svg services/ 2>/dev/null || true
+	@cp -u ../hot-assets/services/*.json ../hot-assets/services/*.js services/ 2>/dev/null || true
 
 linux: install-wails copy-services
 	wails build -tags webkit2_41 -ldflags "$(LDFLAGS)"

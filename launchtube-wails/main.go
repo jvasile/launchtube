@@ -14,7 +14,7 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
-//go:embed services/*.webp services/*.png services/*.jpg services/*.svg
+//go:embed services/*.webp services/*.png services/*.jpg services/*.svg services/*.json services/*.js
 var serviceAssets embed.FS
 
 func main() {

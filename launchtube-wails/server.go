@@ -390,15 +390,14 @@ func (s *Server) GetServiceScript(pageURL, profileID string) string {
 	}
 
 	serviceID := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(matchedServiceName, " ", "-"), "+", ""))
-	scriptPath := filepath.Join(s.assetDir, "services", serviceID+".js")
 
-	content, _, err := s.fileCache.GetString(scriptPath)
+	data, err := s.readServiceFile(serviceID + ".js")
 	if err != nil {
-		Log("GetServiceScript: Script not found for %s at %s", serviceID, scriptPath)
+		Log("GetServiceScript: Script not found for %s", serviceID)
 		return ""
 	}
 
-	return fmt.Sprintf("window.LAUNCH_TUBE_VERSION = \"%s\";\n%s", version, content)
+	return fmt.Sprintf("window.LAUNCH_TUBE_VERSION = \"%s\";\n%s", version, string(data))
 }
 
 func (s *Server) handleService(w http.ResponseWriter, r *http.Request) {
@@ -412,29 +411,42 @@ func (s *Server) handleService(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) serveServiceScript(w http.ResponseWriter, serviceID, requestedVersion string) {
-	scriptPath := filepath.Join(s.assetDir, "services", serviceID+".js")
+	var content []byte
+	var err error
+	var mtime time.Time
 
 	if requestedVersion != "" {
+		// Versioned scripts are filesystem-only
 		versionedPath := s.findBestVersionedScript(serviceID, requestedVersion)
-		if versionedPath != "" {
-			scriptPath = versionedPath
-		} else {
+		if versionedPath == "" {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
+		var contentStr string
+		contentStr, mtime, err = s.fileCache.GetString(versionedPath)
+		content = []byte(contentStr)
+	} else {
+		// Regular scripts use assetDir->embedded fallback
+		content, err = s.readServiceFile(serviceID + ".js")
+		// Check if from filesystem for mtime
+		fsPath := filepath.Join(s.assetDir, "services", serviceID+".js")
+		if info, statErr := os.Stat(fsPath); statErr == nil {
+			mtime = info.ModTime()
+		}
 	}
 
-	content, mtime, err := s.fileCache.GetString(scriptPath)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("// Script not found for service: %s", serviceID), http.StatusNotFound)
 		return
 	}
 
-	versionedScript := fmt.Sprintf("window.LAUNCH_TUBE_VERSION = \"%s\";\n%s", version, content)
+	versionedScript := fmt.Sprintf("window.LAUNCH_TUBE_VERSION = \"%s\";\n%s", version, string(content))
 
 	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("ETag", fmt.Sprintf(`"%d"`, mtime.UnixMilli()))
+	if !mtime.IsZero() {
+		w.Header().Set("ETag", fmt.Sprintf(`"%d"`, mtime.UnixMilli()))
+	}
 	fmt.Fprint(w, versionedScript)
 }
 
@@ -915,6 +927,46 @@ func nameToServiceID(name string) string {
 	return id
 }
 
+// readServiceFile reads a service file, checking assetDir first then embedded
+func (s *Server) readServiceFile(filename string) ([]byte, error) {
+	// Try filesystem first (hot-assets override)
+	path := filepath.Join(s.assetDir, "services", filename)
+	if data, err := os.ReadFile(path); err == nil {
+		return data, nil
+	}
+
+	// Fall back to embedded
+	return serviceAssets.ReadFile("services/" + filename)
+}
+
+// listServiceFiles returns all service files with given extension, merging filesystem and embedded
+func (s *Server) listServiceFiles(ext string) []string {
+	seen := make(map[string]bool)
+	var files []string
+
+	// Check filesystem first
+	servicesDir := filepath.Join(s.assetDir, "services")
+	if entries, err := os.ReadDir(servicesDir); err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ext) {
+				files = append(files, entry.Name())
+				seen[entry.Name()] = true
+			}
+		}
+	}
+
+	// Add embedded files not already seen
+	if entries, err := serviceAssets.ReadDir("services"); err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ext) && !seen[entry.Name()] {
+				files = append(files, entry.Name())
+			}
+		}
+	}
+
+	return files
+}
+
 // handleImage serves images from embedded assets or local filesystem
 func (s *Server) handleImage(w http.ResponseWriter, r *http.Request) {
 	// Check for service param (embedded image lookup by name)
@@ -1053,27 +1105,11 @@ type ServiceLibraryItem struct {
 
 // handleServiceLibrary returns available streaming services
 func (s *Server) handleServiceLibrary(w http.ResponseWriter, r *http.Request) {
-	servicesDir := filepath.Join(s.assetDir, "services")
-	entries, err := os.ReadDir(servicesDir)
-	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode([]ServiceLibraryItem{})
-		return
-	}
+	jsonFiles := s.listServiceFiles(".json")
 
 	var services []ServiceLibraryItem
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-
-		name := entry.Name()
-		if filepath.Ext(name) != ".json" {
-			continue
-		}
-
-		jsonPath := filepath.Join(servicesDir, name)
-		data, err := os.ReadFile(jsonPath)
+	for _, name := range jsonFiles {
+		data, err := s.readServiceFile(name)
 		if err != nil {
 			continue
 		}
@@ -1105,11 +1141,10 @@ func (s *Server) handleServiceLibrary(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Check if logo exists
+		// Check if logo exists (filesystem or embedded)
 		baseName := name[:len(name)-5]
 		for _, ext := range []string{".png", ".jpg", ".svg", ".webp"} {
-			logoPath := filepath.Join(servicesDir, baseName+ext)
-			if _, err := os.Stat(logoPath); err == nil {
+			if _, err := s.readServiceFile(baseName + ext); err == nil {
 				service.HasLogo = true
 				break
 			}

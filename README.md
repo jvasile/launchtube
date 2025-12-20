@@ -37,6 +37,7 @@ instead of Roku apps, you just launch native and web apps.
   * pluto-tv
   * freevee
   * prime
+  * the network
   * hulu
   * soundcloud
   * jellyfin

@@ -133,10 +133,11 @@ your media player from the Windows side works much better.
 
 ### Linux
 
-To build on Linux, you'll need:
+To build on Linux, you'll need Go and Wails:
 
 ```
-sudo apt install libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev
+sudo apt install golang libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev
+go install github.com/wailsapp/wails/v2/cmd/wails@latest
 ```
 
 I also had to use NVIDIA for EGL:
@@ -146,11 +147,12 @@ sudo apt install nvidia-egl-icd libegl-nvidia0
 ```
 ### Windows
 
-To build on Windows, you'll need git and Go installed:
+To build on Windows, you'll need git, Go, and Wails installed:
 
 ```
 scoop install git
 scoop install go
+go install github.com/wailsapp/wails/v2/cmd/wails@latest
 ```
 
 ### WSL

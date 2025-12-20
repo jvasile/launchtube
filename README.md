@@ -151,17 +151,26 @@ sudo apt install nvidia-egl-icd libegl-nvidia0
 ```
 ### Windows
 
-To build on Windows, you'll need git and flutter installed:
+To build on Windows, you'll need git and Go installed:
 
 ```
 scoop install git
-scoop install flutter
+scoop install go
 ```
 
 ### WSL
 
 You *can* develop on the WSL side but build and run on the Windows side.  This
 is what I do.  There are many ways to accomplish this.
+
+## Building
+
+```
+make linux    # Build for Linux
+make windows  # Build for Windows
+make dev      # Run in development mode
+make run      # Build and run
+```
 
 ## Thanks
 

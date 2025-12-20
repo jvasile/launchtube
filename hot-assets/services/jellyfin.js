@@ -868,8 +868,14 @@
             background-color: #ffeb3b !important;
             color: #000 !important;
         }
+        /* Episode list items */
+        .listItem.launchtube-nav-highlight {
+            box-shadow: inset 0 0 0 3px #ffeb3b !important;
+            background-color: rgba(255, 235, 59, 0.2) !important;
+        }
         /* Disable hover when mouse is idle (prevents scroll-under hover) */
-        body.launchtube-mouse-idle .card {
+        body.launchtube-mouse-idle .card,
+        body.launchtube-mouse-idle .listItem {
             pointer-events: none !important;
         }
     `;
@@ -967,6 +973,19 @@
             const minBottom = includeBelow ? -window.innerHeight : 0;
             if (rect.top < maxTop && rect.bottom > minBottom) {
                 elements.push({ el: card, rect, type: 'card' });
+            }
+        });
+
+        // Episode list items (season pages render episodes as list items, not cards)
+        document.querySelectorAll('.listItem[data-id], .listItem-border[data-id], [data-type="Episode"]').forEach(item => {
+            const rect = item.getBoundingClientRect();
+            if (rect.width === 0 || rect.height === 0) return;
+            if (seen.has(item)) return;
+            seen.add(item);
+            const maxTop = includeBelow ? window.innerHeight * 2 : window.innerHeight;
+            const minBottom = includeBelow ? -window.innerHeight : 0;
+            if (rect.top < maxTop && rect.bottom > minBottom) {
+                elements.push({ el: item, rect, type: 'episode' });
             }
         });
 
@@ -1272,6 +1291,17 @@
                 serverLog('Activating card');
                 link.click();
             }
+        } else if (selectedElement.classList.contains('listItem') || selectedElement.dataset?.type === 'Episode') {
+            // Episode list item - play directly
+            const itemId = extractItemId(selectedElement);
+            if (itemId) {
+                serverLog('Playing episode directly');
+                playExternal(itemId, 0);
+            } else {
+                // Fallback: click the element
+                serverLog('Activating episode (no itemId found)');
+                selectedElement.click();
+            }
         } else if (selectedElement.classList.contains('MuiListItemButton-root')) {
             // Sidebar menu item - check if already on this page
             const isSelected = selectedElement.classList.contains('Mui-selected') ||
@@ -1331,7 +1361,7 @@
         if (!mouseHasMoved) return; // Ignore until mouse actually moves
         if (Date.now() < ignoreMouseUntil) return;
 
-        // Check for card, button, tab, navbar element, or alpha picker
+        // Check for card, button, tab, navbar element, alpha picker, or episode
         let card = event.target.closest('.card');
         // Skip poster card on detail pages - it's not clickable
         if (card && card.closest('.detailImageContainer')) card = null;
@@ -1342,7 +1372,8 @@
         const nav = event.target.closest('.headerBackButton, .headerHomeButton, .mainDrawerButton, .headerSyncButton, .headerCastButton, .headerSearchButton, .headerUserButton');
         const menuItem = event.target.closest('a.listItem-border.emby-button, .navMenuOption, .sidebarLink, .listItem-button');
         const alphaPicker = event.target.closest('.alphaPickerButton');
-        const target = card || button || tab || nav || menuItem || alphaPicker;
+        const episode = event.target.closest('.listItem[data-id], [data-type="Episode"]');
+        const target = card || button || tab || nav || menuItem || alphaPicker || episode;
 
         if (target && target !== selectedElement) {
             clearTimeout(mouseDebounceTimer);
@@ -1436,8 +1467,8 @@
             }
         }
 
-        // PRIORITY 2 (normal pages): First visible card - THIS IS THE MAIN CONTENT
-        // Cards should ALWAYS be selected over menu items on non-dashboard pages
+        // PRIORITY 2 (normal pages): First visible card or episode - THIS IS THE MAIN CONTENT
+        // Cards/episodes should ALWAYS be selected over menu items on non-dashboard pages
         const cards = Array.from(document.querySelectorAll('.card')).filter(card => {
             if (card.closest('.detailImageContainer')) return false;
             const rect = card.getBoundingClientRect();
@@ -1450,6 +1481,20 @@
                 serverLog('Auto-selected first card');
             }
             return; // IMPORTANT: Return here even if already selected - don't fall through to menu items
+        }
+
+        // Episode list items (season pages render episodes as list items)
+        const episodes = Array.from(document.querySelectorAll('.listItem[data-id], [data-type="Episode"]')).filter(item => {
+            const rect = item.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0 && rect.top < window.innerHeight && rect.bottom > 0;
+        });
+        if (episodes.length > 0) {
+            if (!hasAutoSelected) {
+                hasAutoSelected = true;
+                selectElement(episodes[0]);
+                serverLog('Auto-selected first episode');
+            }
+            return;
         }
 
         // PRIORITY 3: Menu items - fallback for pages with no cards

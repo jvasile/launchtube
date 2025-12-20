@@ -4,6 +4,8 @@ import (
 	"embed"
 	"flag"
 	"fmt"
+	"os"
+	"strings"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -43,7 +45,24 @@ func main() {
 	// Create Wails app
 	app := NewApp(server, *userFlag, *appFlag)
 
-	// Run Wails application
+	// Run Wails application with panic recovery for better error messages
+	defer func() {
+		if r := recover(); r != nil {
+			msg := fmt.Sprintf("%v", r)
+			if strings.Contains(msg, "GTK") || strings.Contains(msg, "gtk") {
+				fmt.Fprintln(os.Stderr, "")
+				fmt.Fprintln(os.Stderr, "Error: Failed to initialize GTK. Missing dependencies.")
+				fmt.Fprintln(os.Stderr, "")
+				fmt.Fprintln(os.Stderr, "Install required packages:")
+				fmt.Fprintln(os.Stderr, "  Debian/Ubuntu: sudo apt install libgtk-3-0 libwebkit2gtk-4.1-0")
+				fmt.Fprintln(os.Stderr, "  Fedora:        sudo dnf install gtk3 webkit2gtk4.1")
+				fmt.Fprintln(os.Stderr, "  Arch:          sudo pacman -S gtk3 webkit2gtk-4.1")
+				os.Exit(1)
+			}
+			panic(r) // re-panic for other errors
+		}
+	}()
+
 	err := wails.Run(&options.App{
 		Title:            "LaunchTube",
 		Width:            1920,

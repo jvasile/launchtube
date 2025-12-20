@@ -203,32 +203,45 @@
 
     // Global escape handler for when not playing
     function handleGlobalEscape(event) {
-        if (event.key === 'Escape' && !modalElement && !confirmationElement) {
-            // Check if any menu, dialog, or dropdown is open - let Jellyfin handle closing it
-            const openMenu = document.querySelector('.actionSheet, .dialogContainer:not(.hide), .mainDrawer.mainDrawer-visible, .actionSheetContent, .dialogOpened, .menuOpen');
-            if (openMenu) {
-                serverLog('Escape with open menu, letting Jellyfin close it');
-                // Don't prevent default - let Jellyfin's own escape handler close the menu
-                return;
-            }
+        if (event.key !== 'Escape') return;
 
-            event.preventDefault();
-            event.stopPropagation();
+        serverLog(`Escape pressed: modal=${!!modalElement} confirm=${!!confirmationElement}`);
 
-            // Check if we're on a detail page or dashboard - go back instead of exit
-            const isDetailPage = document.querySelector('.detailPageContent, .itemDetailPage, [data-type="Program"]') ||
-                                 window.location.hash.includes('id=');
-            const isDashboard = window.location.hash.includes('/dashboard') ||
-                               window.location.hash.includes('/configurationpage');
-            if (isDetailPage || isDashboard) {
-                serverLog(`Escape on ${isDashboard ? 'dashboard' : 'detail page'}, going back`);
-                ignoreMouseUntil = Date.now() + 1000;
-                history.back();
-                return;
-            }
-
-            showExitConfirmation();
+        if (modalElement || confirmationElement) {
+            serverLog('Escape ignored: modal or confirmation is showing');
+            return;
         }
+
+        // Check if any menu, dialog, or dropdown is open - let Jellyfin handle closing it
+        const openMenu = document.querySelector('.actionSheet, .dialogContainer:not(.hide), .mainDrawer.mainDrawer-visible, .actionSheetContent, .dialogOpened, .menuOpen');
+        if (openMenu) {
+            serverLog(`Escape with open menu: ${openMenu.className}`);
+            // Don't prevent default - let Jellyfin's own escape handler close the menu
+            return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+
+        // Check if we're on a detail page or dashboard - go back instead of exit
+        // Use hash as primary indicator since DOM elements may persist during SPA transitions
+        const hashHasId = window.location.hash.includes('id=');
+        const isDashboard = window.location.hash.includes('/dashboard') ||
+                           window.location.hash.includes('/configurationpage');
+        const isDetailPage = hashHasId;
+
+        serverLog(`Escape: hashHasId=${hashHasId} isDashboard=${isDashboard} hash=${location.hash}`);
+
+        if (isDetailPage || isDashboard) {
+            serverLog(`Escape on ${isDashboard ? 'dashboard' : 'detail page'}, going back`);
+            ignoreMouseUntil = Date.now() + 1000;
+            history.back();
+            return;
+        }
+
+        serverLog('Escape: showing exit confirmation');
+        showExitConfirmation();
     }
 
     let confirmationElement = null;

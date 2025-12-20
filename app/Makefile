@@ -1,7 +1,7 @@
 VERSION := 2.0.0
 GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 BUILD_DATE := $(shell date -u +"%Y-%m-%d" 2>/dev/null || echo unknown)
-REPO_URL := $(shell git remote get-url origin 2>/dev/null | sed 's/\.git$$//' || echo unknown)
+REPO_URL := $(shell git remote get-url origin 2>/dev/null | sed 's/\.git$$//; s/^git@github\.com:/https:\/\/github.com\//' || echo unknown)
 
 LDFLAGS := -X main.version=$(VERSION) -X main.commit=$(GIT_COMMIT) -X main.buildDate=$(BUILD_DATE) -X main.repoURL=$(REPO_URL)
 

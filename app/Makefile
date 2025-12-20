@@ -14,6 +14,8 @@ install-wails:
 
 linux: install-wails
 	wails build -tags webkit2_41 -ldflags "$(LDFLAGS)"
+	chgrp -R users frontend/dist frontend/wailsjs build/bin 2>/dev/null || true
+	chmod -R g+rwX frontend/dist frontend/wailsjs build/bin 2>/dev/null || true
 
 windows: install-wails
 	wails build -platform windows/amd64 -ldflags "$(LDFLAGS)"
@@ -30,4 +32,5 @@ run: linux
 	./build/bin/launchtube
 
 install: linux
+	rm -f $(HOME)/.local/bin/launchtube
 	install -m 755 build/bin/launchtube $(HOME)/.local/bin/launchtube

@@ -740,15 +740,15 @@
         const style = document.createElement('style');
         style.textContent = `
             /* Hide play options in context menus that don't trigger external player */
-            .actionSheetMenuItem[data-id="play"],
-            .actionSheetMenuItem[data-id="playallfromhere"],
-            .actionSheetMenuItem[data-id="queue"],
-            .actionSheetMenuItem[data-id="queuenext"],
-            .listItem[data-action="play"],
-            .listItem[data-action="playallfromhere"],
-            /* Hide menu items with play icon */
-            .actionSheetMenuItem:has(.play_arrow),
-            .listItem:has(.play_arrow) {
+            /* Only target items inside .actionSheet to avoid hiding episode lists */
+            .actionSheet .actionSheetMenuItem[data-id="play"],
+            .actionSheet .actionSheetMenuItem[data-id="playallfromhere"],
+            .actionSheet .actionSheetMenuItem[data-id="queue"],
+            .actionSheet .actionSheetMenuItem[data-id="queuenext"],
+            .actionSheet .listItem[data-action="play"],
+            .actionSheet .listItem[data-action="playallfromhere"],
+            .actionSheet .actionSheetMenuItem:has(.play_arrow),
+            .actionSheet .listItem:has(.play_arrow) {
                 display: none !important;
             }
         `;

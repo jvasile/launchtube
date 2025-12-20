@@ -130,10 +130,9 @@
          *
          * IF LOADER NOT DETECTED (no postMessage within 500ms):
          *   - runDetection() calls showSetupUI() to reveal the container
-         *   - For Chrome: Use CDP to check if Tampermonkey is installed
+         *   - Use CDP to check if Tampermonkey is installed
          *     - If Tampermonkey found: show loader script install button
          *     - If not found: show Tampermonkey install button first
-         *   - For Firefox: Show manual install flow (CDP doesn't work)
          *
          * IMPORTANT: markAllComplete() must call showSetupUI() because it can
          * be triggered by postMessage BEFORE runDetection() finishes waiting.
@@ -219,12 +218,7 @@
 
         // Install userscript manager - navigate directly to avoid popup blocker
         function installUserscriptManager() {
-            // Detect browser and navigate to appropriate extension store
-            const isFirefox = navigator.userAgent.toLowerCase().includes('firefox');
-            const storeUrl = isFirefox
-                ? 'https://addons.mozilla.org/firefox/addon/tampermonkey/'
-                : 'https://chrome.google.com/webstore/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo';
-
+            const storeUrl = 'https://chrome.google.com/webstore/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo';
             // Navigate directly - use back button or re-launch app after installing
             window.location.href = storeUrl;
         }
@@ -272,43 +266,8 @@
             return null;
         }
 
-        // Show manual setup flow for Firefox (server-side detection doesn't work)
-        function showFirefoxManualFlow() {
-            const isFirefox = navigator.userAgent.toLowerCase().includes('firefox');
-            const storeUrl = isFirefox
-                ? 'https://addons.mozilla.org/firefox/addon/tampermonkey/'
-                : 'https://chrome.google.com/webstore/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo';
-
-            document.getElementById('step1-status').className = 'status checking';
-            document.getElementById('step1-status').textContent = 'Install a userscript manager if you haven\'t already:';
-            document.getElementById('step1-install').innerHTML = `
-                <p><a class="btn" href="${storeUrl}" target="_blank">Install Tampermonkey</a></p>
-                <p style="margin-top: 12px; opacity: 0.7;">Already installed? Continue to step 2.</p>
-            `;
-            document.getElementById('step1-install').classList.remove('hidden');
-
-            document.getElementById('step2-status').className = 'status checking';
-            document.getElementById('step2-status').textContent = 'Install the LaunchTube loader script:';
-            document.getElementById('step2-install').innerHTML = `
-                <p><a class="btn" href="/launchtube-loader.user.js" target="_blank">Install Loader Script</a></p>
-                <p style="margin-top: 16px;"><button class="btn secondary" onclick="proceedToTarget()" style="border: none; cursor: pointer;">Done - Return to Launcher</button></p>
-            `;
-            document.getElementById('step2-install').classList.remove('hidden');
-        }
-
-        function proceedToTarget() {
-            if (targetUrl && targetUrl !== '/') {
-                window.open(targetUrl, '_self');
-            } else {
-                // No target - close browser to return to launcher
-                closeBrowser();
-            }
-        }
-
         // Main detection flow
         async function runDetection() {
-            const isFirefox = navigator.userAgent.toLowerCase().includes('firefox');
-
             // Wait briefly for loader to announce itself via postMessage
             // If it does and we have a target, redirect immediately without showing UI
             await new Promise(r => setTimeout(r, 500));
@@ -317,28 +276,8 @@
             // Mark initial loader check as done - if we proceed, we'll show UI
             loaderCheckDone = true;
 
-            // No target URL means we're in admin mode - always show setup UI
-            if (!hasTarget) {
-                showSetupUI();
-                if (isFirefox) {
-                    showFirefoxManualFlow();
-                } else {
-                    // For Chrome, still do the detection flow but with UI visible
-                    runChromeDetection();
-                }
-                return;
-            }
-
-            // We have a target but loader didn't respond - need setup
+            // Show setup UI and run detection
             showSetupUI();
-
-            // Firefox: server-side extension detection doesn't work, show manual flow
-            if (isFirefox) {
-                console.log('LaunchTube: Firefox detected, showing manual setup flow');
-                showFirefoxManualFlow();
-                return;
-            }
-
             runChromeDetection();
         }
 

@@ -23,8 +23,6 @@ type BrowserInfo struct {
 }
 
 var knownBrowsers = []BrowserInfo{
-	{Name: "Firefox", Executable: "firefox", FullscreenFlag: "--kiosk"},
-	{Name: "Firefox", Executable: "firefox.exe", FullscreenFlag: "--kiosk"},
 	{Name: "Chrome", Executable: "google-chrome", FullscreenFlag: "--start-fullscreen"},
 	{Name: "Chrome", Executable: "google-chrome-stable", FullscreenFlag: "--start-fullscreen"},
 	{Name: "Chrome", Executable: "chrome", FullscreenFlag: "--start-fullscreen"},
@@ -100,7 +98,7 @@ func (bm *BrowserManager) FindBrowser(name string) *BrowserInfo {
 	return nil
 }
 
-func (bm *BrowserManager) Launch(browserName, url, profileID string, serverPort int) error {
+func (bm *BrowserManager) Launch(browserName, url, profileID string) error {
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
 
@@ -118,8 +116,8 @@ func (bm *BrowserManager) Launch(browserName, url, profileID string, serverPort 
 	// Don't use --start-fullscreen; let the script handle fullscreen on user gesture
 	args := []string{}
 
-	// Add user-data-dir for Chrome/Chromium profile isolation
-	if profileID != "" && browser.Name != "Firefox" {
+	// Add user-data-dir for profile isolation
+	if profileID != "" {
 		profilePath := filepath.Join(bm.dataDir, "profiles", profileID, "chrome")
 		args = append(args, "--user-data-dir="+profilePath)
 
@@ -127,68 +125,59 @@ func (bm *BrowserManager) Launch(browserName, url, profileID string, serverPort 
 		bm.clearStaleServiceWorkerCache(profileID)
 	}
 
-	// Load extensions for Chrome/Chromium
-	if browser.Name != "Firefox" {
-		var extensions []string
+	// Load extensions
+	var extensions []string
 
-		// LaunchTube loader extension
-		if ext := bm.findExtension("launchtube"); ext != "" {
-			extensions = append(extensions, ext)
-			Log("Loading LaunchTube extension from: %s", ext)
-		}
-
-		// uBlock Origin Lite
-		if ext := bm.findExtension("ublock-origin"); ext != "" {
-			extensions = append(extensions, ext)
-			Log("Loading uBlock Origin from: %s", ext)
-		}
-
-		// Dark Reader
-		if ext := bm.findExtension("dark-reader"); ext != "" {
-			extensions = append(extensions, ext)
-			Log("Loading Dark Reader from: %s", ext)
-		}
-
-		if len(extensions) > 0 {
-			args = append(args, "--load-extension="+strings.Join(extensions, ","))
-		}
+	// LaunchTube loader extension
+	if ext := bm.findExtension("launchtube"); ext != "" {
+		extensions = append(extensions, ext)
+		Log("Loading LaunchTube extension from: %s", ext)
 	}
 
-	// Chrome-specific flags
-	if browser.Name != "Firefox" {
-		args = append(args,
-			"--disable-infobars",
-			"--autoplay-policy=no-user-gesture-required",
-			"--hide-crash-restore-bubble",
-			"--disable-features=MediaRouter,GlobalMediaControls,LocalNetworkAccessChecks",
-			"--disable-device-discovery-notifications",
-			"--disable-notifications",
-			"--disable-sync",
-			"--no-first-run",
-			"--disable-default-apps",
-			"--force-dark-mode",
-			"--enable-features=AutomaticFullscreenContentSetting",
-			"--start-fullscreen",
-			"--remote-debugging-port=9222",
-		)
+	// uBlock Origin Lite
+	if ext := bm.findExtension("ublock-origin"); ext != "" {
+		extensions = append(extensions, ext)
+		Log("Loading uBlock Origin from: %s", ext)
+	}
 
-		// Create policy file for automatic fullscreen permission
-		if profileID != "" {
-			policyDir := filepath.Join(bm.dataDir, "profiles", profileID, "chrome", "policies", "managed")
-			os.MkdirAll(policyDir, 0755)
-			policyFile := filepath.Join(policyDir, "launchtube.json")
-			policy := `{"AutomaticFullscreenAllowedForUrls": ["https://www.youtube.com", "https://youtube.com", "*"]}`
-			os.WriteFile(policyFile, []byte(policy), 0644)
-		}
+	// Dark Reader
+	if ext := bm.findExtension("dark-reader"); ext != "" {
+		extensions = append(extensions, ext)
+		Log("Loading Dark Reader from: %s", ext)
+	}
+
+	if len(extensions) > 0 {
+		args = append(args, "--load-extension="+strings.Join(extensions, ","))
+	}
+
+	// Chrome flags
+	args = append(args,
+		"--disable-infobars",
+		"--autoplay-policy=no-user-gesture-required",
+		"--hide-crash-restore-bubble",
+		"--disable-features=MediaRouter,GlobalMediaControls,LocalNetworkAccessChecks",
+		"--disable-device-discovery-notifications",
+		"--disable-notifications",
+		"--disable-sync",
+		"--no-first-run",
+		"--disable-default-apps",
+		"--force-dark-mode",
+		"--enable-features=AutomaticFullscreenContentSetting",
+		"--start-fullscreen",
+		"--remote-debugging-port=9222",
+	)
+
+	// Create policy file for automatic fullscreen permission
+	if profileID != "" {
+		policyDir := filepath.Join(bm.dataDir, "profiles", profileID, "chrome", "policies", "managed")
+		os.MkdirAll(policyDir, 0755)
+		policyFile := filepath.Join(policyDir, "launchtube.json")
+		policy := `{"AutomaticFullscreenAllowedForUrls": ["https://www.youtube.com", "https://youtube.com", "*"]}`
+		os.WriteFile(policyFile, []byte(policy), 0644)
 	}
 
 	// Add the URL
-	if browser.Name == "Firefox" && serverPort > 0 {
-		// Firefox needs setup page for userscript installation
-		args = append(args, fmt.Sprintf("http://localhost:%d/setup?target=%s", serverPort, url))
-	} else {
-		args = append(args, url)
-	}
+	args = append(args, url)
 
 	Log("Launching browser: %s %v", browser.Executable, args)
 

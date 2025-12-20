@@ -752,7 +752,7 @@ func (s *Server) handleUserscript(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "Firefox/userscript setup is no longer supported", http.StatusGone)
+	http.Error(w, "Userscript setup is no longer supported", http.StatusGone)
 }
 
 func (s *Server) handleInstall(w http.ResponseWriter, r *http.Request) {
@@ -867,7 +867,7 @@ func (s *Server) LaunchBrowser(browserName, url, profileID string, focusAlert bo
 		return s.cdpBrowser.Launch(url, profileID)
 	}
 
-	err := s.browserMgr.Launch(browserName, url, profileID, s.port)
+	err := s.browserMgr.Launch(browserName, url, profileID)
 	if err != nil {
 		return err
 	}

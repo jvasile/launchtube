@@ -124,12 +124,6 @@ EOF
 
 ```
 
-### Install greasemonkey or tampermonkey into Firefox/Chrome.
-
-Launchtube will try to detect if you need these and prompt you to install one.
-This is what enables custom javascript on a web app, whether that app is
-self-hosted (like Emby) or delivered from a company like Netflix.
-
 ## Operating System
 
 This should work on Linux or Windows or even WSL.  If you're going to run
